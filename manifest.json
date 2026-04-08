@@ -11,5 +11,6 @@
 	"icons": {
 		"128": "icon.png"
 	},
-	"permissions": ["alarms", "contextMenus"]
+	"permissions": ["alarms", "contextMenus", "scripting", "tabs", "storage"],
+	"host_permissions": ["http://*/*", "https://*/*"]
 }

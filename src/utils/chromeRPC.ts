@@ -116,3 +116,11 @@ export async function completeCurrentTaskAndAdvance(): Promise<PracticeState | n
 		action: "completeCurrentTaskAndAdvance",
 	});
 }
+
+export async function notifyPopupOpened(): Promise<void> {
+	await sendMessage<{ ok: true }>({ action: "popupOpened" });
+}
+
+export async function dismissPinReminder(): Promise<void> {
+	await sendMessage<{ ok: true }>({ action: "dismissPinReminder" });
+}

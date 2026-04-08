@@ -7,12 +7,12 @@ body,
 	background: #ede8de;
 }
 
-html,
-body {
+html.popup-mode,
+body.popup-mode {
 	overflow: hidden;
 }
 
-#__root {
+#__root.popup-mode {
 	overflow-x: hidden;
 	overflow-y: auto;
 }
