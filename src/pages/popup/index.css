@@ -1,14 +1,10 @@
+html,
 body {
-	width: 600px;
-	height: 800px;
+	width: 760px;
+	height: 720px;
 	margin: 0;
-	font-family:
-		-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
-		"Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
-	position: relative;
 	overflow: hidden;
+	background: #ede8de;
 }
 
 #__root {

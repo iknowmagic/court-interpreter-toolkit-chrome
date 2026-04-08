@@ -126,7 +126,7 @@ async function loadSession(date: string): Promise<PracticeSession | null> {
 	});
 }
 
-async function listSessionDates(): Promise<string[]> {
+export async function listSessionDates(): Promise<string[]> {
 	const database = await _getDB();
 	const tx = database.transaction(SESSIONS_STORE, "readonly");
 	const store = tx.objectStore(SESSIONS_STORE);

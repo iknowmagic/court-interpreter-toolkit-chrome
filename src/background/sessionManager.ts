@@ -28,6 +28,16 @@ export async function getSessionState(): Promise<PracticeState | null> {
 	return sessionState.state;
 }
 
+export async function loadStateByDate(date: string): Promise<PracticeState> {
+	const state = await db.loadStateByDate(date);
+	sessionState.state = state;
+	return state;
+}
+
+export async function listSessionDates(): Promise<string[]> {
+	return db.listSessionDates();
+}
+
 export async function startSession(): Promise<PracticeState | null> {
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();

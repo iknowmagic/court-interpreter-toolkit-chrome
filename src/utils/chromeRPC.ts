@@ -25,6 +25,18 @@ async function sendMessage<T>(message: Message): Promise<T> {
 	});
 }
 
+export async function loadState(): Promise<PracticeState> {
+	return sendMessage<PracticeState>({ action: "loadState" });
+}
+
+export async function loadStateByDate(date: string): Promise<PracticeState> {
+	return sendMessage<PracticeState>({ action: "loadStateByDate", date });
+}
+
+export async function listSessionDates(): Promise<string[]> {
+	return sendMessage<string[]>({ action: "listSessionDates" });
+}
+
 export async function getSessionState(): Promise<PracticeState | null> {
 	return sendMessage<PracticeState | null>({ action: "getSessionState" });
 }
@@ -54,6 +66,10 @@ export async function saveSession(
 	state: PracticeState,
 ): Promise<PracticeState> {
 	return sendMessage<PracticeState>({ action: "saveSession", state });
+}
+
+export async function saveState(state: PracticeState): Promise<PracticeState> {
+	return saveSession(state);
 }
 
 export async function newDay(

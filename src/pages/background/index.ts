@@ -14,8 +14,17 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 			let response: unknown;
 
 			switch (request.action) {
+				case "loadState":
 				case "getSessionState":
 					response = await sessionManager.getSessionState();
+					break;
+
+				case "loadStateByDate":
+					response = await sessionManager.loadStateByDate(request.date);
+					break;
+
+				case "listSessionDates":
+					response = await sessionManager.listSessionDates();
 					break;
 
 				case "startSession":
