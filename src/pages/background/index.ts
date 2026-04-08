@@ -2,12 +2,30 @@ import * as sessionManager from "../../background/sessionManager";
 
 console.log("background script loaded");
 
+async function handleInstallWelcome(
+	details: chrome.runtime.InstalledDetails,
+): Promise<void> {
+	if (details.reason !== chrome.runtime.OnInstalledReason.INSTALL) return;
+
+	try {
+		await chrome.tabs.create({
+			url: chrome.runtime.getURL("welcome.html"),
+		});
+	} catch (error) {
+		console.error("Failed to open welcome page on install:", error);
+	}
+}
+
 // Initialize session manager on startup
 sessionManager.initializeSessionManager().catch((err) => {
 	console.error("Failed to initialize session manager:", err);
 });
 sessionManager.initializeActionContextMenu().catch((err) => {
 	console.error("Failed to initialize action context menu:", err);
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+	void handleInstallWelcome(details);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
