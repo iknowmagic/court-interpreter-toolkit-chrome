@@ -9,12 +9,13 @@ import {
   createTaskId,
   formatDuration,
   formatLosAngelesClock,
-  formatLosAngelesDateLabel,
   formatLosAngelesTimestamp,
+  getLosAngelesDateString,
   reconcileSessionWithTemplate
 } from '@shared/practice'
 
 type ModalState = { mode: 'add' | 'edit'; taskId?: string; name: string; duration: string }
+type NoteSaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 interface CalendarCell {
   date: Date
@@ -92,11 +93,15 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     return new Date(today.getFullYear(), today.getMonth(), 1)
   })
   const [sessionDates, setSessionDates] = useState<string[]>([])
+  const [completedSessionDates, setCompletedSessionDates] = useState<string[]>([])
   const [running, setRunning] = useState(false)
   const [ready, setReady] = useState(false)
   const [showCalendarPopover, setShowCalendarPopover] = useState(false)
+  const [noteSaveStatus, setNoteSaveStatus] = useState<NoteSaveStatus>('idle')
+  const [lastNoteSavedAt, setLastNoteSavedAt] = useState<string | null>(null)
   const previousCurrentTaskId = useRef<string | null>(session.currentTaskId)
   const saveTimer = useRef<number | null>(null)
+  const noteChangedSinceSaveRef = useRef(false)
   const calendarPopoverRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -127,6 +132,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
           )
           const dates = await rpc.listSessionDates()
           setSessionDates(dates)
+          noteChangedSinceSaveRef.current = false
+          setNoteSaveStatus('idle')
+          setLastNoteSavedAt(null)
         }
       } catch (error) {
         console.error('Failed to load practice state', error)
@@ -143,15 +151,61 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     if (!ready) return
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
-      void rpc.saveState({ template, session })
-      setSessionDates((previous) =>
-        previous.includes(session.date) ? previous : [...previous, session.date]
-      )
+      void (async () => {
+        try {
+          await rpc.saveState({ template, session })
+          setSessionDates((previous) =>
+            previous.includes(session.date) ? previous : [...previous, session.date]
+          )
+          if (noteChangedSinceSaveRef.current) {
+            noteChangedSinceSaveRef.current = false
+            setLastNoteSavedAt(formatLosAngelesClock())
+            setNoteSaveStatus('saved')
+          }
+        } catch (error) {
+          console.error('Failed to save practice state', error)
+          if (noteChangedSinceSaveRef.current) {
+            setNoteSaveStatus('error')
+          }
+        }
+      })()
     }, 350)
     return () => {
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
     }
   }, [ready, session, template])
+
+  useEffect(() => {
+    let cancelled = false
+    if (sessionDates.length === 0) {
+      setCompletedSessionDates([])
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void (async () => {
+      try {
+        const completionKeys = await Promise.all(
+          sessionDates.map(async (dateKey) => {
+            const loaded = await rpc.loadStateByDate(dateKey)
+            const completed =
+              loaded.session.done || loaded.session.tasks.every((task) => task.completedAt !== null)
+            return completed ? dateKey : null
+          })
+        )
+        if (!cancelled) {
+          setCompletedSessionDates(completionKeys.filter((dateKey): dateKey is string => !!dateKey))
+        }
+      } catch (error) {
+        console.error('Failed to load session completion states', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [sessionDates])
 
   useEffect(() => {
     const previous = previousCurrentTaskId.current
@@ -171,8 +225,8 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     if (!showCalendarPopover) return
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (!calendarPopoverRef.current) return
-      if (!calendarPopoverRef.current.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (calendarPopoverRef.current && !calendarPopoverRef.current.contains(target)) {
         setShowCalendarPopover(false)
       }
     }
@@ -238,6 +292,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   )
   const activeIndex = taskIndex(session.tasks, session.currentTaskId)
   const selectedIndex = taskIndex(session.tasks, selected?.id ?? null)
+  const selectedTemplateIndex = selected ? template.findIndex((task) => task.id === selected.id) : -1
   const doneCount = session.tasks.filter((task) => task.completedAt !== null).length
   const totalMinutes = template.reduce((sum, task) => sum + task.duration, 0)
   const remainingMinutes = Math.ceil(
@@ -253,19 +308,14 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     if (remainingSeconds === 0 || active.completedAt) return totalSeconds
     return remainingSeconds
   }, [active])
+  const todayDateKey = getLosAngelesDateString()
+  const isViewingToday = session.date === todayDateKey
   const sessionDateSet = useMemo(() => new Set(sessionDates), [sessionDates])
-  const sortedSessionDateKeys = useMemo(() => {
-    const keys = new Set(sessionDates)
-    keys.add(session.date)
-    return [...keys].sort()
-  }, [session.date, sessionDates])
-  const currentSessionDateIndex = sortedSessionDateKeys.indexOf(session.date)
-  const previousSessionDateKey =
-    currentSessionDateIndex > 0 ? sortedSessionDateKeys[currentSessionDateIndex - 1] : null
-  const nextSessionDateKey =
-    currentSessionDateIndex >= 0 && currentSessionDateIndex < sortedSessionDateKeys.length - 1
-      ? sortedSessionDateKeys[currentSessionDateIndex + 1]
-      : null
+  const completedSessionDateSet = useMemo(() => {
+    const keys = new Set(completedSessionDates)
+    if (session.done) keys.add(session.date)
+    return keys
+  }, [completedSessionDates, session.date, session.done])
   const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth])
 
   const syncTemplate = (nextTemplate: PracticeTemplateTask[]) => {
@@ -276,7 +326,17 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     )
   }
 
+  const resetNoteSaveIndicator = () => {
+    noteChangedSinceSaveRef.current = false
+    setNoteSaveStatus('idle')
+    setLastNoteSavedAt(null)
+  }
+
   const updateNote = (taskId: string, note: string) => {
+    const currentNote = session.tasks.find((task) => task.id === taskId)?.note ?? ''
+    if (note === currentNote) return
+    noteChangedSinceSaveRef.current = true
+    setNoteSaveStatus('saving')
     setSession((previous) => ({
       ...previous,
       tasks: previous.tasks.map((task) => (task.id === taskId ? { ...task, note } : task))
@@ -310,10 +370,11 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       name: selected.name,
       duration: String(selected.duration)
     })
-  const deleteTask = () =>
-    selected &&
-    template.length > 1 &&
+  const deleteTask = () => {
+    if (!selected || template.length <= 1) return
+    if (!window.confirm(`Delete "${selected.name}" from the template?`)) return
     syncTemplate(template.filter((task) => task.id !== selected.id))
+  }
   const moveTask = (direction: -1 | 1) => {
     if (!selected) return
     const index = template.findIndex((task) => task.id === selected.id)
@@ -354,52 +415,38 @@ export default function CourtInterpreterApp(): React.JSX.Element {
           : task
       )
     }))
-  const skipNext = () =>
-    active &&
+  const completeAndNext = () => {
+    if (!active) return
+    setRunning(false)
     setSession((previous) => {
       const index = taskIndex(previous.tasks, active.id)
-      const completedAt = active.completedAt ?? formatLosAngelesTimestamp()
-      const tasks = previous.tasks.map((task) =>
-        task.id === active.id ? { ...task, remainingSeconds: 0, completedAt } : task
+      if (index < 0) return previous
+      const completedAt = previous.tasks[index]?.completedAt ?? formatLosAngelesTimestamp()
+      const tasks = previous.tasks.map((task, taskIndexValue) =>
+        taskIndexValue === index ? { ...task, remainingSeconds: 0, completedAt } : task
       )
-      const nextId = tasks[index + 1]?.id ?? tasks[tasks.length - 1]?.id ?? active.id
+
+      const nextIncomplete = tasks.slice(index + 1).find((task) => task.completedAt === null)
+      if (!nextIncomplete) {
+        return {
+          ...previous,
+          tasks,
+          currentTaskId: tasks[tasks.length - 1]?.id ?? previous.currentTaskId,
+          done: true
+        }
+      }
+
       return {
         ...previous,
         tasks,
-        currentTaskId:
-          index >= tasks.length - 1 ? (tasks[tasks.length - 1]?.id ?? active.id) : nextId,
-        done: index >= tasks.length - 1
+        currentTaskId: nextIncomplete.id,
+        done: false
       }
     })
-  const markDone = () =>
-    active &&
-    setSession((previous) => ({
-      ...previous,
-      tasks: previous.tasks.map((task) =>
-        task.id === active.id
-          ? { ...task, completedAt: task.completedAt ?? formatLosAngelesTimestamp() }
-          : task
-      )
-    }))
-
-  const newDay = async () => {
-    setRunning(false)
-    const next = await rpc.newDay(template)
-    setTemplate(next.template)
-    setSession(next.session)
-    setCalendarMonth(
-      new Date(
-        parseDateKey(next.session.date).getFullYear(),
-        parseDateKey(next.session.date).getMonth(),
-        1
-      )
-    )
-    setSessionDates((previous) =>
-      previous.includes(next.session.date) ? previous : [...previous, next.session.date]
-    )
-    setSelectedTaskId(next.session.currentTaskId ?? next.template[0]?.id ?? '')
   }
+
   const resetDefaults = async () => {
+    if (!window.confirm('Reset task template and today session to defaults?')) return
     setRunning(false)
     const next = await rpc.resetToDefaults()
     setTemplate(next.template)
@@ -415,6 +462,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       previous.includes(next.session.date) ? previous : [...previous, next.session.date]
     )
     setSelectedTaskId(next.session.currentTaskId ?? next.template[0]?.id ?? '')
+    resetNoteSaveIndicator()
   }
 
   const loadDate = async (dateKey: string) => {
@@ -427,9 +475,33 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       new Date(parseDateKey(dateKey).getFullYear(), parseDateKey(dateKey).getMonth(), 1)
     )
     setShowCalendarPopover(false)
+    resetNoteSaveIndicator()
   }
-  const goToPreviousDay = () => previousSessionDateKey && void loadDate(previousSessionDateKey)
-  const goToNextDay = () => nextSessionDateKey && void loadDate(nextSessionDateKey)
+
+  const viewingDateLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      }).format(parseDateKey(session.date)),
+    [session.date]
+  )
+  const sessionDateHeaderLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      }).format(parseDateKey(session.date)),
+    [session.date]
+  )
+
+  const toggleCalendarPopover = () => {
+    setShowCalendarPopover((current) => !current)
+  }
 
   const moveCalendarMonth = (direction: -1 | 1) => {
     setCalendarMonth(
@@ -460,23 +532,31 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-btn:hover:not(:disabled){background:${C.accentBg}!important;border-color:${C.accent}!important;color:${C.accent}!important}
         .practice-btn-strong{background:${C.accent}!important;border-color:${C.accent}!important;color:#fff!important}
         .practice-btn-strong:hover:not(:disabled){background:${C.accentDk}!important;border-color:${C.accentDk}!important;color:#fff!important}
+        .practice-btn-danger{background:#8f2f1f!important;border-color:#8f2f1f!important;color:#fff!important}
+        .practice-btn-danger:hover:not(:disabled){background:#76271a!important;border-color:#76271a!important;color:#fff!important}
         .practice-current-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
         .practice-input:focus,.practice-textarea:focus{border-color:${C.accent}!important;outline:none}
         .practice-calendar-popover-wrap{position:relative}
-        .practice-calendar-popover{position:absolute;left:0;bottom:calc(100% + 8px);z-index:250;width:min(320px,calc(100vw - 20px));background:${C.surface};border:1px solid ${C.border};border-radius:12px;box-shadow:0 18px 42px rgba(26,23,20,0.22);padding:8px}
+        .practice-calendar-popover{position:absolute;left:0;top:calc(100% + 8px);z-index:250;width:min(320px,calc(100vw - 20px));background:${C.surface};border:1px solid ${C.border};border-radius:12px;box-shadow:0 18px 42px rgba(26,23,20,0.22);padding:10px}
+        .practice-popover-title{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${C.muted};margin-bottom:8px}
         .practice-calendar-popover .practice-calendar{margin-top:0}
+        .practice-calendar-day-inner{position:relative;display:inline-flex;align-items:center;justify-content:center;width:100%}
+        .practice-calendar-check{position:absolute;top:-4px;right:2px;font-size:9px;line-height:1;color:${C.done};opacity:0}
+        .practice-calendar-day.is-complete .practice-calendar-check{opacity:1}
+        .practice-calendar-day:disabled{opacity:.45;cursor:default}
+        .practice-history-badge{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:${C.muted}}
         .practice-loading{min-height:100%;display:grid;place-items:center;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:${C.bg};color:${C.text};text-align:center}
-        .practice-app--popup .practice-shell{width:min(660px,100%);padding:0}
+        .practice-app--popup .practice-shell{width:min(620px,100%);padding:0}
         .practice-app--popup .practice-layout{grid-template-columns:240px minmax(0,1fr);grid-template-areas:'left right' 'left notes';gap:8px;padding:8px}
         .practice-app--popup .practice-header{padding:10px 16px 8px;gap:12px}
         .practice-app--popup .practice-title{font-size:22px}
         .practice-app--popup .practice-subtitle{font-size:9px;letter-spacing:0.16em}
         .practice-app--popup .practice-date,.practice-app--popup .practice-summary{font-size:11px}
         .practice-app--popup .practice-clock{font-size:14px}
-        .practice-app--popup .practice-side{gap:8px}
+        .practice-app--popup .practice-side{gap:8px;height:100%}
         .practice-app--popup .practice-main{gap:10px}
-        .practice-app--popup .practice-side .practice-list-card{flex:0 0 auto}
-        .practice-app--popup .practice-task-list{max-height:268px}
+        .practice-app--popup .practice-side .practice-list-card{flex:1 1 auto;min-height:0}
+        .practice-app--popup .practice-task-list{max-height:none;min-height:0}
         .practice-app--popup .practice-list-head{padding:8px 10px;font-size:9px}
         .practice-app--popup .practice-task{padding:8px 10px}
         .practice-app--popup .practice-task-name{font-size:11px}
@@ -489,7 +569,8 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-app--popup .practice-meta{gap:12px;padding:8px 10px;font-size:10px}
         .practice-app--popup .practice-note-title{font-size:12px;margin-bottom:6px}
         .practice-app--popup .practice-textarea{min-height:68px;padding:8px 10px;margin-bottom:8px}
-        @media (max-width:745px){.practice-main .practice-grid3.practice-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.practice-main .practice-done-btn{grid-column:1 / -1}}
+        .practice-app--popup .practice-calendar-popover{width:min(280px,calc(100vw - 20px))}
+        @media (max-width:745px){.practice-main .practice-grid2.practice-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media (max-width:650px){.practice-layout{grid-template-columns:1fr;grid-template-areas:'right' 'left' 'notes'}.practice-task-list{max-height:none}}
       `}</style>
 
@@ -498,7 +579,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
           <div>
             <div className="practice-title">COURT INTERPRETER</div>
             <div className="practice-subtitle">Daily Practice Session</div>
-            <div className="practice-date">{formatLosAngelesDateLabel()}</div>
+            <div className="practice-date">{sessionDateHeaderLabel}</div>
           </div>
           <div className="practice-clock-wrap">
             <div className="practice-clock">{clock}</div>
@@ -552,25 +633,22 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                 })}
               </div>
             </div>
-            <div className="practice-grid3">
-              <button type="button" className="practice-btn" onClick={addTask}>
-                + Add
+            <div className="practice-grid2">
+              <button
+                type="button"
+                className="practice-btn"
+                onClick={addTask}
+                disabled={!isViewingToday}
+              >
+                + Add Task
               </button>
               <button
                 type="button"
                 className="practice-btn"
                 onClick={editTask}
-                disabled={!selected}
+                disabled={!isViewingToday || !selected}
               >
-                Edit
-              </button>
-              <button
-                type="button"
-                className="practice-btn"
-                onClick={deleteTask}
-                disabled={!selected || template.length <= 1}
-              >
-                Delete
+                Edit Task
               </button>
             </div>
             <div className="practice-grid2">
@@ -578,7 +656,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                 type="button"
                 className="practice-btn"
                 onClick={() => moveTask(-1)}
-                disabled={!selected}
+                disabled={!isViewingToday || selectedTemplateIndex <= 0}
               >
                 ↑ Move Up
               </button>
@@ -586,35 +664,31 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                 type="button"
                 className="practice-btn"
                 onClick={() => moveTask(1)}
-                disabled={!selected}
+                disabled={
+                  !isViewingToday ||
+                  selectedTemplateIndex < 0 ||
+                  selectedTemplateIndex >= template.length - 1
+                }
               >
                 ↓ Move Down
               </button>
             </div>
             <div className="practice-grid2">
-              <button type="button" className="practice-btn practice-btn-strong" onClick={newDay}>
-                New Day
+              <button
+                type="button"
+                className="practice-btn"
+                onClick={deleteTask}
+                disabled={!isViewingToday || !selected || template.length <= 1}
+              >
+                Delete Task
               </button>
-              <button type="button" className="practice-btn" onClick={resetDefaults}>
+              <button
+                type="button"
+                className="practice-btn practice-btn-danger"
+                onClick={() => void resetDefaults()}
+                disabled={!isViewingToday}
+              >
                 Reset List
-              </button>
-            </div>
-            <div className="practice-grid2">
-              <button
-                type="button"
-                className="practice-btn"
-                onClick={goToPreviousDay}
-                disabled={!previousSessionDateKey}
-              >
-                ← Prev Day
-              </button>
-              <button
-                type="button"
-                className="practice-btn"
-                onClick={goToNextDay}
-                disabled={!nextSessionDateKey}
-              >
-                Next Day →
               </button>
             </div>
             <div className="practice-calendar-popover-wrap" ref={calendarPopoverRef}>
@@ -623,13 +697,14 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                 className="practice-btn"
                 style={{ width: '100%' }}
                 aria-expanded={showCalendarPopover}
-                aria-label="Toggle calendar"
-                onClick={() => setShowCalendarPopover((current) => !current)}
+                aria-label="Open calendar"
+                onClick={toggleCalendarPopover}
               >
-                Calendar
+                Open Calendar
               </button>
               {showCalendarPopover ? (
                 <div className="practice-calendar-popover" role="dialog" aria-label="Session calendar">
+                  <div className="practice-popover-title">Session Calendar</div>
                   <div className="practice-calendar">
                     <div className="practice-calendar-head">
                       <button
@@ -664,14 +739,22 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                       {calendarCells.map((cell) => {
                         const isSelectedDate = cell.dateKey === session.date
                         const hasData = sessionDateSet.has(cell.dateKey)
+                        const isCompleteDay = completedSessionDateSet.has(cell.dateKey)
+                        const isSelectable = hasData || cell.dateKey === todayDateKey
                         return (
                           <button
                             key={cell.dateKey}
                             type="button"
-                            className={`practice-calendar-day${isSelectedDate ? ' is-selected' : ''}${cell.inMonth ? '' : ' is-outside'}${hasData ? ' has-data' : ''}`}
+                            className={`practice-calendar-day${isSelectedDate ? ' is-selected' : ''}${cell.inMonth ? '' : ' is-outside'}${isCompleteDay ? ' is-complete' : ''}`}
+                            disabled={!isSelectable}
                             onClick={() => void loadDate(cell.dateKey)}
                           >
-                            <span>{cell.date.getDate()}</span>
+                            <span className="practice-calendar-day-inner">
+                              {cell.date.getDate()}
+                              <span className="practice-calendar-check" aria-hidden="true">
+                                ✓
+                              </span>
+                            </span>
                           </button>
                         )
                       })}
@@ -686,7 +769,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
             <div className="practice-card practice-timer-card">
               <div className="practice-current-head">
                 <div className="practice-eyebrow">Current Task</div>
-                {selected?.completedAt ? (
+                {!isViewingToday ? (
+                  <span className="practice-history-badge">{`Viewing ${viewingDateLabel}`}</span>
+                ) : selected?.completedAt ? (
                   <span className="practice-completed">Completed {selected.completedAt}</span>
                 ) : null}
               </div>
@@ -695,7 +780,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
               </div>
               <div className="practice-timer">{formatDuration(timerDisplaySeconds)}</div>
               <div className="practice-status">
-                {session.done
+                {!isViewingToday
+                  ? 'History view — read only'
+                  : session.done
                   ? 'Every task complete — great session'
                   : running
                     ? '● Running'
@@ -706,36 +793,33 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                   type="button"
                   className="practice-btn practice-btn-strong"
                   onClick={play}
-                  disabled={running || session.done || !active}
+                  disabled={!isViewingToday || running || session.done || !active}
                 >
                   ▶ Play
                 </button>
-                <button type="button" className="practice-btn" onClick={stop} disabled={!running}>
+                <button
+                  type="button"
+                  className="practice-btn"
+                  onClick={stop}
+                  disabled={!isViewingToday || !running}
+                >
                   ■ Stop
                 </button>
               </div>
-              <div className="practice-grid3 practice-actions">
+              <div className="practice-grid2 practice-actions">
                 <button
                   type="button"
                   className="practice-btn"
                   onClick={resetCurrent}
-                  disabled={!active || session.done}
+                  disabled={!isViewingToday || !active || session.done}
                 >
                   ↺ Reset Task
                 </button>
                 <button
                   type="button"
-                  className="practice-btn"
-                  onClick={skipNext}
-                  disabled={!active || session.done}
-                >
-                  ⏭ Next Task
-                </button>
-                <button
-                  type="button"
-                  className="practice-btn practice-btn-strong practice-done-btn"
-                  onClick={markDone}
-                  disabled={!active || session.done || active.completedAt !== null}
+                  className="practice-btn practice-btn-strong"
+                  onClick={completeAndNext}
+                  disabled={!isViewingToday || !active || session.done || active.completedAt !== null}
                 >
                   ✓ Done
                 </button>
@@ -776,28 +860,8 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                 value={selected?.note ?? ''}
                 onChange={(event) => selected && updateNote(selected.id, event.target.value)}
                 placeholder="What did you practice?"
-                disabled={!selected}
+                disabled={!selected || !isViewingToday}
               />
-              <div className="practice-notes-footer">
-                <div className="practice-note-actions">
-                  <button
-                    type="button"
-                    className="practice-btn practice-btn-strong"
-                    onClick={() => selected && updateNote(selected.id, selected.note)}
-                    disabled={!selected}
-                  >
-                    Save Note
-                  </button>
-                  <button
-                    type="button"
-                    className="practice-btn"
-                    onClick={() => selected && updateNote(selected.id, '')}
-                    disabled={!selected}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
             </div>
           </section>
 
