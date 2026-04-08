@@ -2,9 +2,6 @@
 	"manifest_version": 3,
 	"name": "Court Interpreter Toolkit",
 	"description": "Practice tool for court interpreters with timed sessions, vocabulary drills, and task management.",
-	"options_ui": {
-		"page": "src/pages/options/index.html"
-	},
 	"action": {
 		"default_popup": "src/pages/popup/index.html",
 		"default_icon": {
