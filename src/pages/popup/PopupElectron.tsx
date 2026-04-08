@@ -656,7 +656,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-app--popup .practice-btn{padding:7px 8px;font-size:11px}
         .practice-app--popup .practice-timer-card,.practice-app--popup .practice-notes-card{padding:14px 16px}
         .practice-app--popup .practice-current{font-size:20px;margin-bottom:10px}
-        .practice-app--popup .practice-timer{font-size:56px;margin-bottom:2px}
+        .practice-app--popup .practice-timer{font-size:64px;margin-bottom:2px}
         .practice-app--popup .practice-status{margin-bottom:10px}
         .practice-app--popup .practice-actions{margin-bottom:8px}
         .practice-app--popup .practice-meta{gap:12px;padding:8px 10px;font-size:10px}
@@ -912,9 +912,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                   type="button"
                   className="practice-btn practice-btn-strong"
                   onClick={play}
-                  disabled={
-                    !isViewingToday || running || !active
-                  }
+                  disabled={!isViewingToday || running || !active}
                 >
                   ▶ Play
                 </button>
