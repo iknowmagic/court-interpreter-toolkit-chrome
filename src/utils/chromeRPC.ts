@@ -100,10 +100,13 @@ export async function getRunningState(): Promise<{
 export async function updateToolbarStatus(
 	state: PracticeState,
 	isRunning: boolean,
+	options?: { timestampMs?: number; forceStopped?: boolean },
 ): Promise<void> {
 	await sendMessage<{ ok: true }>({
 		action: "updateToolbarStatus",
 		state,
 		isRunning,
+		timestampMs: options?.timestampMs,
+		forceStopped: options?.forceStopped,
 	});
 }

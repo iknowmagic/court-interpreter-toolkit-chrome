@@ -127,6 +127,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   const saveTimer = useRef<number | null>(null);
   const noteChangedSinceSaveRef = useRef(false);
   const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
+  const latestToolbarStateRef = useRef({ template, session });
 
   useEffect(() => {
     const id = window.setInterval(
@@ -205,23 +206,46 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   }, [ready, session, template]);
 
   useEffect(() => {
+    latestToolbarStateRef.current = { template, session };
+  }, [session, template]);
+
+  useEffect(() => {
     if (!ready) return;
-    void rpc.updateToolbarStatus({ template, session }, running).catch((error) => {
-      console.error("Failed to update toolbar status", error);
-    });
+    void rpc
+      .updateToolbarStatus({ template, session }, running, {
+        timestampMs: Date.now(),
+      })
+      .catch((error) => {
+        console.error("Failed to update toolbar status", error);
+      });
   }, [ready, running, session, template]);
 
   useEffect(() => {
-    const handlePageHide = () => {
+    const stopToolbarRunning = () => {
       if (!ready) return;
-      void rpc.updateToolbarStatus({ template, session }, false);
+      const latestState = latestToolbarStateRef.current;
+      void rpc.updateToolbarStatus(
+        latestState,
+        false,
+        { timestampMs: Date.now(), forceStopped: true },
+      );
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) stopToolbarRunning();
     };
 
-    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pagehide", stopToolbarRunning);
+    window.addEventListener("beforeunload", stopToolbarRunning);
+    window.addEventListener("unload", stopToolbarRunning);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pagehide", stopToolbarRunning);
+      window.removeEventListener("beforeunload", stopToolbarRunning);
+      window.removeEventListener("unload", stopToolbarRunning);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stopToolbarRunning();
     };
-  }, [ready, session, template]);
+  }, [ready]);
 
   useEffect(() => {
     let cancelled = false;

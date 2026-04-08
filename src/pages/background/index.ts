@@ -67,6 +67,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 					response = await sessionManager.updateToolbarStatus(
 						request.state,
 						Boolean(request.isRunning),
+						typeof request.timestampMs === "number"
+							? request.timestampMs
+							: undefined,
+						Boolean(request.forceStopped),
 					);
 					break;
 

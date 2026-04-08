@@ -14,6 +14,7 @@ let sessionState: SessionManagerState = {
 	isPaused: false,
 	pausedAtMs: 0,
 };
+let lastToolbarStatusUpdateMs = 0;
 
 function formatToolbarDuration(seconds: number): string {
 	const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -244,10 +245,18 @@ export async function editTemplate(
 export async function updateToolbarStatus(
 	state: PracticeState,
 	isRunning: boolean,
-): Promise<{ ok: true }> {
+	timestampMs?: number,
+	forceStopped?: boolean,
+): Promise<{ ok: true; ignored?: true }> {
+	const safeTimestamp = Math.max(0, Math.floor(timestampMs ?? Date.now()));
+	if (safeTimestamp < lastToolbarStatusUpdateMs) {
+		return { ok: true, ignored: true };
+	}
+	lastToolbarStatusUpdateMs = safeTimestamp;
+
 	sessionState.state = state;
-	sessionState.isRunning = isRunning;
-	sessionState.isPaused = !isRunning;
+	sessionState.isRunning = forceStopped ? false : isRunning;
+	sessionState.isPaused = !sessionState.isRunning;
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 	return { ok: true };
 }
