@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as rpc from "@utils/chromeRPC";
 import {
   DEFAULT_TEMPLATE,
@@ -25,6 +26,14 @@ interface CalendarCell {
   date: Date;
   dateKey: string;
   inMonth: boolean;
+}
+
+type CalendarPopoverPlacement = "above" | "below" | "center";
+
+interface CalendarPopoverPosition {
+  top: number;
+  left: number;
+  placement: CalendarPopoverPlacement;
 }
 
 const WEEK_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -120,12 +129,15 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   const [running, setRunning] = useState(false);
   const [ready, setReady] = useState(false);
   const [showCalendarPopover, setShowCalendarPopover] = useState(false);
+  const [calendarPopoverPosition, setCalendarPopoverPosition] =
+    useState<CalendarPopoverPosition | null>(null);
   const [noteSaveStatus, setNoteSaveStatus] = useState<NoteSaveStatus>("idle");
   const [lastNoteSavedAt, setLastNoteSavedAt] = useState<string | null>(null);
   const previousCurrentTaskId = useRef<string | null>(session.currentTaskId);
   const saveTimer = useRef<number | null>(null);
   const noteChangedSinceSaveRef = useRef(false);
-  const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
+  const calendarPopoverAnchorRef = useRef<HTMLDivElement | null>(null);
+  const calendarPopoverPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const id = window.setInterval(
@@ -294,14 +306,84 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   }, [session.done]);
 
   useEffect(() => {
+    if (!showCalendarPopover) {
+      setCalendarPopoverPosition(null);
+      return;
+    }
+
+    const anchor = calendarPopoverAnchorRef.current;
+    if (!anchor) return;
+
+    const gap = 8;
+    const viewportPad = 8;
+    const updatePosition = () => {
+      const anchorRect = anchor.getBoundingClientRect();
+      const panelRect = calendarPopoverPanelRef.current?.getBoundingClientRect();
+      const popoverWidth = panelRect?.width ?? 280;
+      const popoverHeight = panelRect?.height ?? 308;
+      const maxLeft = Math.max(
+        viewportPad,
+        window.innerWidth - popoverWidth - viewportPad,
+      );
+      const anchoredLeft = Math.min(
+        maxLeft,
+        Math.max(viewportPad, anchorRect.left),
+      );
+
+      const aboveTop = anchorRect.top - popoverHeight - gap;
+      if (aboveTop >= viewportPad) {
+        setCalendarPopoverPosition({
+          top: aboveTop,
+          left: anchoredLeft,
+          placement: "above",
+        });
+        return;
+      }
+
+      const belowTop = anchorRect.bottom + gap;
+      if (belowTop + popoverHeight <= window.innerHeight - viewportPad) {
+        setCalendarPopoverPosition({
+          top: belowTop,
+          left: anchoredLeft,
+          placement: "below",
+        });
+        return;
+      }
+
+      const centeredTop = Math.max(
+        viewportPad,
+        Math.floor((window.innerHeight - popoverHeight) / 2),
+      );
+      const centeredLeft = Math.max(
+        viewportPad,
+        Math.floor((window.innerWidth - popoverWidth) / 2),
+      );
+      setCalendarPopoverPosition({
+        top: centeredTop,
+        left: centeredLeft,
+        placement: "center",
+      });
+    };
+
+    updatePosition();
+    const rafId = window.requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [showCalendarPopover, calendarMonth]);
+
+  useEffect(() => {
     if (!showCalendarPopover) return;
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (
-        calendarPopoverRef.current &&
-        !calendarPopoverRef.current.contains(target)
-      ) {
+      const insideTrigger = calendarPopoverAnchorRef.current?.contains(target);
+      const insidePopover = calendarPopoverPanelRef.current?.contains(target);
+      if (!insideTrigger && !insidePopover) {
         setShowCalendarPopover(false);
       }
     };
@@ -628,8 +710,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-btn-danger:hover:not(:disabled){background:#76271a!important;border-color:#76271a!important;color:#fff!important}
         .practice-current-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
         .practice-input:focus,.practice-textarea:focus{border-color:${C.accent}!important;outline:none}
-        .practice-calendar-popover-wrap{position:relative}
-        .practice-calendar-popover{position:absolute;left:0;top:calc(100% + 8px);z-index:250;width:min(320px,calc(100vw - 20px));background:${C.surface};border:1px solid ${C.border};border-radius:12px;box-shadow:0 18px 42px rgba(26,23,20,0.22);padding:10px}
+        .practice-calendar-popover{position:fixed;z-index:250;width:280px;max-width:calc(100vw - 16px);background:${C.surface};border:1px solid ${C.border};border-radius:12px;box-shadow:0 18px 42px rgba(26,23,20,0.22);padding:10px}
         .practice-popover-title{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${C.muted};margin-bottom:8px}
         .practice-calendar-popover .practice-calendar{margin-top:0}
         .practice-calendar-day-inner{position:relative;display:inline-flex;align-items:center;justify-content:center;width:100%}
@@ -662,7 +743,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-app--popup .practice-meta{gap:12px;padding:8px 10px;font-size:10px}
         .practice-app--popup .practice-note-title{font-size:12px;margin-bottom:6px}
         .practice-app--popup .practice-textarea{min-height:64px;padding:8px 10px;margin-bottom:8px}
-        .practice-app--popup .practice-calendar-popover{width:min(280px,calc(100vw - 20px))}
+        .practice-app--popup .practice-calendar-popover{width:280px;max-width:calc(100vw - 16px)}
         @media (max-width:745px){.practice-main .practice-grid2.practice-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media (max-width:650px){.practice-layout{grid-template-columns:1fr;grid-template-areas:'right' 'left' 'notes'}.practice-task-list{max-height:none}}
       `}</style>
@@ -795,88 +876,19 @@ export default function CourtInterpreterApp(): React.JSX.Element {
             </div>
             <div
               className="practice-calendar-popover-wrap"
-              ref={calendarPopoverRef}
+              ref={calendarPopoverAnchorRef}
             >
               <button
                 type="button"
                 className="practice-btn"
                 style={{ width: "100%" }}
                 aria-expanded={showCalendarPopover}
+                aria-controls="practice-calendar-popover"
                 aria-label="Open calendar"
                 onClick={toggleCalendarPopover}
               >
                 Open Calendar
               </button>
-              {showCalendarPopover ? (
-                <div
-                  className="practice-calendar-popover"
-                  role="dialog"
-                  aria-label="Session calendar"
-                >
-                  <div className="practice-popover-title">Session Calendar</div>
-                  <div className="practice-calendar">
-                    <div className="practice-calendar-head">
-                      <button
-                        type="button"
-                        className="practice-calendar-nav"
-                        aria-label="Previous month"
-                        onClick={() => moveCalendarMonth(-1)}
-                      >
-                        ‹
-                      </button>
-                      <div className="practice-calendar-title">
-                        <span>{monthLabel(calendarMonth)}</span>
-                        <span>{calendarMonth.getFullYear()}</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="practice-calendar-nav"
-                        aria-label="Next month"
-                        onClick={() => moveCalendarMonth(1)}
-                      >
-                        ›
-                      </button>
-                    </div>
-
-                    <div className="practice-calendar-grid practice-calendar-weekdays">
-                      {WEEK_LABELS.map((label) => (
-                        <span key={label}>{label}</span>
-                      ))}
-                    </div>
-
-                    <div className="practice-calendar-grid">
-                      {calendarCells.map((cell) => {
-                        const isSelectedDate = cell.dateKey === session.date;
-                        const hasData = sessionDateSet.has(cell.dateKey);
-                        const isCompleteDay = completedSessionDateSet.has(
-                          cell.dateKey,
-                        );
-                        const isSelectable =
-                          hasData || cell.dateKey === todayDateKey;
-                        return (
-                          <button
-                            key={cell.dateKey}
-                            type="button"
-                            className={`practice-calendar-day${isSelectedDate ? " is-selected" : ""}${cell.inMonth ? "" : " is-outside"}${isCompleteDay ? " is-complete" : ""}`}
-                            disabled={!isSelectable}
-                            onClick={() => void loadDate(cell.dateKey)}
-                          >
-                            <span className="practice-calendar-day-inner">
-                              {cell.date.getDate()}
-                              <span
-                                className="practice-calendar-check"
-                                aria-hidden="true"
-                              >
-                                ✓
-                              </span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
             </div>
           </section>
 
@@ -997,6 +1009,86 @@ export default function CourtInterpreterApp(): React.JSX.Element {
           </section>
         </main>
       </div>
+
+      {showCalendarPopover && calendarPopoverPosition
+        ? createPortal(
+            <div
+              id="practice-calendar-popover"
+              ref={calendarPopoverPanelRef}
+              className="practice-calendar-popover"
+              data-placement={calendarPopoverPosition.placement}
+              role="dialog"
+              aria-label="Session calendar"
+              style={{
+                top: `${calendarPopoverPosition.top}px`,
+                left: `${calendarPopoverPosition.left}px`,
+              }}
+            >
+              <div className="practice-popover-title">Session Calendar</div>
+              <div className="practice-calendar">
+                <div className="practice-calendar-head">
+                  <button
+                    type="button"
+                    className="practice-calendar-nav"
+                    aria-label="Previous month"
+                    onClick={() => moveCalendarMonth(-1)}
+                  >
+                    ‹
+                  </button>
+                  <div className="practice-calendar-title">
+                    <span>{monthLabel(calendarMonth)}</span>
+                    <span>{calendarMonth.getFullYear()}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="practice-calendar-nav"
+                    aria-label="Next month"
+                    onClick={() => moveCalendarMonth(1)}
+                  >
+                    ›
+                  </button>
+                </div>
+
+                <div className="practice-calendar-grid practice-calendar-weekdays">
+                  {WEEK_LABELS.map((label) => (
+                    <span key={label}>{label}</span>
+                  ))}
+                </div>
+
+                <div className="practice-calendar-grid">
+                  {calendarCells.map((cell) => {
+                    const isSelectedDate = cell.dateKey === session.date;
+                    const hasData = sessionDateSet.has(cell.dateKey);
+                    const isCompleteDay = completedSessionDateSet.has(
+                      cell.dateKey,
+                    );
+                    const isSelectable = hasData || cell.dateKey === todayDateKey;
+                    return (
+                      <button
+                        key={cell.dateKey}
+                        type="button"
+                        className={`practice-calendar-day${isSelectedDate ? " is-selected" : ""}${cell.inMonth ? "" : " is-outside"}${isCompleteDay ? " is-complete" : ""}`}
+                        disabled={!isSelectable}
+                        onClick={() => void loadDate(cell.dateKey)}
+                      >
+                        <span className="practice-calendar-day-inner">
+                          {cell.date.getDate()}
+                          <span
+                            className="practice-calendar-check"
+                            aria-hidden="true"
+                          >
+                            ✓
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {modal ? (
         <div className="practice-modal-backdrop">
