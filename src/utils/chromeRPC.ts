@@ -110,3 +110,9 @@ export async function updateToolbarStatus(
 		forceStopped: options?.forceStopped,
 	});
 }
+
+export async function completeCurrentTaskAndAdvance(): Promise<PracticeState | null> {
+	return sendMessage<PracticeState | null>({
+		action: "completeCurrentTaskAndAdvance",
+	});
+}

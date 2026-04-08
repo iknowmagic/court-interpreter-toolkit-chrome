@@ -6,9 +6,16 @@ console.log("background script loaded");
 sessionManager.initializeSessionManager().catch((err) => {
 	console.error("Failed to initialize session manager:", err);
 });
+sessionManager.initializeActionContextMenu().catch((err) => {
+	console.error("Failed to initialize action context menu:", err);
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
 	sessionManager.handleBackgroundTickAlarm(alarm);
+});
+
+chrome.contextMenus.onClicked.addListener((info) => {
+	void sessionManager.handleActionContextMenuClick(String(info.menuItemId));
 });
 
 // Handle messages from UI pages (popup, options, panels, etc.)
@@ -76,6 +83,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 							: undefined,
 						Boolean(request.forceStopped),
 					);
+					break;
+
+				case "completeCurrentTaskAndAdvance":
+					response = await sessionManager.completeCurrentTaskAndAdvanceNoStart();
 					break;
 
 				default:
