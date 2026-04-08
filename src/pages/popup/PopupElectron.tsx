@@ -309,6 +309,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         const active = findTask(previous.tasks, previous.currentTaskId);
         if (!active) return previous;
         const index = taskIndex(previous.tasks, active.id);
+        if (index < 0) return previous;
         const tasks = previous.tasks.map((task) =>
           task.id === active.id
             ? {
@@ -325,18 +326,20 @@ export default function CourtInterpreterApp(): React.JSX.Element {
             ? { ...task, remainingSeconds: 0, completedAt }
             : task,
         );
-        const nextId =
-          completedTasks[index + 1]?.id ??
-          completedTasks[completedTasks.length - 1]?.id ??
-          active.id;
+        const nextIncomplete =
+          completedTasks
+            .slice(index + 1)
+            .find((task) => task.completedAt === null) ??
+          completedTasks.find((task) => task.completedAt === null) ??
+          null;
+        const done = nextIncomplete === null;
         return {
           ...previous,
           tasks: completedTasks,
-          currentTaskId:
-            index >= completedTasks.length - 1
-              ? (completedTasks[completedTasks.length - 1]?.id ?? active.id)
-              : nextId,
-          done: index >= completedTasks.length - 1,
+          currentTaskId: done
+            ? (completedTasks[completedTasks.length - 1]?.id ?? active.id)
+            : nextIncomplete.id,
+          done,
         };
       });
     }, 1000);
@@ -500,7 +503,6 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     }));
   const completeAndNext = () => {
     if (!active) return;
-    setRunning(false);
     setSession((previous) => {
       const index = taskIndex(previous.tasks, active.id);
       if (index < 0) return previous;
@@ -512,9 +514,10 @@ export default function CourtInterpreterApp(): React.JSX.Element {
           : task,
       );
 
-      const nextIncomplete = tasks
-        .slice(index + 1)
-        .find((task) => task.completedAt === null);
+      const nextIncomplete =
+        tasks.slice(index + 1).find((task) => task.completedAt === null) ??
+        tasks.find((task) => task.completedAt === null) ??
+        null;
       if (!nextIncomplete) {
         return {
           ...previous,
