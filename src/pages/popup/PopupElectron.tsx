@@ -205,6 +205,25 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   }, [ready, session, template]);
 
   useEffect(() => {
+    if (!ready) return;
+    void rpc.updateToolbarStatus({ template, session }, running).catch((error) => {
+      console.error("Failed to update toolbar status", error);
+    });
+  }, [ready, running, session, template]);
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      if (!ready) return;
+      void rpc.updateToolbarStatus({ template, session }, false);
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [ready, session, template]);
+
+  useEffect(() => {
     let cancelled = false;
     if (sessionDates.length === 0) {
       setCompletedSessionDates([]);

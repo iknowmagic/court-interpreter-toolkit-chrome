@@ -15,10 +15,80 @@ let sessionState: SessionManagerState = {
 	pausedAtMs: 0,
 };
 
+function formatToolbarDuration(seconds: number): string {
+	const safeSeconds = Math.max(0, Math.floor(seconds));
+	const minutes = Math.floor(safeSeconds / 60);
+	const remainingSeconds = safeSeconds % 60;
+	return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function compactBadgeTime(seconds: number): string {
+	const safeSeconds = Math.max(0, Math.floor(seconds));
+	const minutes = Math.floor(safeSeconds / 60);
+	const remainingSeconds = safeSeconds % 60;
+	if (minutes >= 100) return `${minutes}m`;
+	return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+async function refreshToolbarAction(
+	state: PracticeState | null,
+	isRunning: boolean,
+): Promise<void> {
+	if (!chrome.action) return;
+
+	if (!state) {
+		await chrome.action.setTitle({ title: "Court Interpreter Toolkit" });
+		await chrome.action.setBadgeText({ text: "" });
+		return;
+	}
+
+	const currentTask =
+		state.session.tasks.find((task) => task.id === state.session.currentTaskId) ??
+		state.session.tasks[0] ??
+		null;
+
+	if (!currentTask) {
+		const doneText = state.session.done ? "DONE" : "";
+		await chrome.action.setTitle({
+			title: state.session.done
+				? "Session complete"
+				: "Court Interpreter Toolkit",
+		});
+		await chrome.action.setBadgeBackgroundColor({
+			color: state.session.done ? "#2e7d52" : "#7a6e65",
+		});
+		await chrome.action.setBadgeText({ text: doneText });
+		return;
+	}
+
+	const displaySeconds =
+		currentTask.completedAt || currentTask.remainingSeconds === 0
+			? currentTask.duration * 60
+			: currentTask.remainingSeconds;
+	const timeLabel = formatToolbarDuration(displaySeconds);
+	const badgeText = state.session.done ? "DONE" : compactBadgeTime(displaySeconds);
+	const statusLabel = state.session.done
+		? "Complete"
+		: isRunning
+			? "Running"
+			: "Stopped";
+	const title = `${statusLabel}: ${currentTask.name} - ${timeLabel}`;
+	const badgeColor = state.session.done
+		? "#2e7d52"
+		: isRunning
+			? "#c4622d"
+			: "#7a6e65";
+
+	await chrome.action.setTitle({ title });
+	await chrome.action.setBadgeBackgroundColor({ color: badgeColor });
+	await chrome.action.setBadgeText({ text: badgeText });
+}
+
 export async function initializeSessionManager(): Promise<void> {
 	// Initialize IndexedDB and load current state
 	await db.initDB();
 	sessionState.state = await db.loadState();
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 }
 
 export async function getSessionState(): Promise<PracticeState | null> {
@@ -31,6 +101,7 @@ export async function getSessionState(): Promise<PracticeState | null> {
 export async function loadStateByDate(date: string): Promise<PracticeState> {
 	const state = await db.loadStateByDate(date);
 	sessionState.state = state;
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 	return state;
 }
 
@@ -45,6 +116,7 @@ export async function startSession(): Promise<PracticeState | null> {
 
 	sessionState.isRunning = true;
 	sessionState.isPaused = false;
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
 }
@@ -59,12 +131,15 @@ export async function pauseSession(): Promise<PracticeState | null> {
 		sessionState.state = await db.saveState(sessionState.state);
 	}
 
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+
 	return sessionState.state;
 }
 
 export async function resumeSession(): Promise<PracticeState | null> {
 	sessionState.isRunning = true;
 	sessionState.isPaused = false;
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
 }
@@ -112,6 +187,7 @@ export async function decrementTimer(
 	// Persist state periodically (e.g., every 10 decrements)
 	// For now, persist on every change to ensure no data loss
 	sessionState.state = await db.saveState(sessionState.state);
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
 }
@@ -120,6 +196,7 @@ export async function saveSession(
 	state: PracticeState,
 ): Promise<PracticeState> {
 	sessionState.state = await db.saveState(state);
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 	return sessionState.state;
 }
 
@@ -135,6 +212,7 @@ export async function newDay(
 
 	sessionState.isRunning = false;
 	sessionState.isPaused = false;
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
 }
@@ -143,6 +221,7 @@ export async function resetToDefaults(): Promise<PracticeState> {
 	sessionState.state = await db.resetToDefaults();
 	sessionState.isRunning = false;
 	sessionState.isPaused = false;
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
 }
@@ -157,8 +236,20 @@ export async function editTemplate(
 	// Save new template and reconcile current session
 	sessionState.state.template = template;
 	sessionState.state = await db.saveState(sessionState.state);
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
+}
+
+export async function updateToolbarStatus(
+	state: PracticeState,
+	isRunning: boolean,
+): Promise<{ ok: true }> {
+	sessionState.state = state;
+	sessionState.isRunning = isRunning;
+	sessionState.isPaused = !isRunning;
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+	return { ok: true };
 }
 
 export function getRunningState(): { isRunning: boolean; isPaused: boolean } {

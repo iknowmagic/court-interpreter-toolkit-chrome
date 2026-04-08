@@ -63,6 +63,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 					response = sessionManager.getRunningState();
 					break;
 
+				case "updateToolbarStatus":
+					response = await sessionManager.updateToolbarStatus(
+						request.state,
+						Boolean(request.isRunning),
+					);
+					break;
+
 				default:
 					response = { error: `Unknown action: ${request.action}` };
 			}

@@ -96,3 +96,14 @@ export async function getRunningState(): Promise<{
 		action: "getRunningState",
 	});
 }
+
+export async function updateToolbarStatus(
+	state: PracticeState,
+	isRunning: boolean,
+): Promise<void> {
+	await sendMessage<{ ok: true }>({
+		action: "updateToolbarStatus",
+		state,
+		isRunning,
+	});
+}
