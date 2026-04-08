@@ -17,6 +17,5 @@
 		"48": "icon-48.png",
 		"128": "icon-128.png"
 	},
-	"permissions": ["alarms", "contextMenus", "scripting", "tabs", "storage"],
-	"host_permissions": ["http://*/*", "https://*/*"]
+	"permissions": ["alarms", "contextMenus", "storage"]
 }
