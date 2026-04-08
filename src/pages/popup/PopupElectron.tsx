@@ -228,6 +228,18 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     return remainingSeconds
   }, [active])
   const sessionDateSet = useMemo(() => new Set(sessionDates), [sessionDates])
+  const sortedSessionDateKeys = useMemo(() => {
+    const keys = new Set(sessionDates)
+    keys.add(session.date)
+    return [...keys].sort()
+  }, [session.date, sessionDates])
+  const currentSessionDateIndex = sortedSessionDateKeys.indexOf(session.date)
+  const previousSessionDateKey =
+    currentSessionDateIndex > 0 ? sortedSessionDateKeys[currentSessionDateIndex - 1] : null
+  const nextSessionDateKey =
+    currentSessionDateIndex >= 0 && currentSessionDateIndex < sortedSessionDateKeys.length - 1
+      ? sortedSessionDateKeys[currentSessionDateIndex + 1]
+      : null
   const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth])
 
   const syncTemplate = (nextTemplate: PracticeTemplateTask[]) => {
@@ -389,6 +401,8 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       new Date(parseDateKey(dateKey).getFullYear(), parseDateKey(dateKey).getMonth(), 1)
     )
   }
+  const goToPreviousDay = () => previousSessionDateKey && void loadDate(previousSessionDateKey)
+  const goToNextDay = () => nextSessionDateKey && void loadDate(nextSessionDateKey)
 
   const moveCalendarMonth = (direction: -1 | 1) => {
     setCalendarMonth(
@@ -406,7 +420,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     )
 
   return (
-    <div className="practice-app">
+    <div className="practice-app practice-app--popup">
       <style>{`
         .practice-app{min-height:100%;display:flex;flex-direction:column;background:${C.bg};color:${C.text}}
         .practice-shell{width:min(1120px,calc(100% - 24px));margin:0 auto;display:flex;flex-direction:column;flex:1}
@@ -422,6 +436,30 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-current-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
         .practice-input:focus,.practice-textarea:focus{border-color:${C.accent}!important;outline:none}
         .practice-loading{min-height:100%;display:grid;place-items:center;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:${C.bg};color:${C.text};text-align:center}
+        .practice-app--popup .practice-shell{width:min(660px,100%);padding:0}
+        .practice-app--popup .practice-layout{grid-template-columns:240px minmax(0,1fr);gap:8px;padding:8px}
+        .practice-app--popup .practice-header{padding:10px 16px 8px;gap:12px}
+        .practice-app--popup .practice-title{font-size:22px}
+        .practice-app--popup .practice-subtitle{font-size:9px;letter-spacing:0.16em}
+        .practice-app--popup .practice-date,.practice-app--popup .practice-summary{font-size:11px}
+        .practice-app--popup .practice-clock{font-size:14px}
+        .practice-app--popup .practice-side{gap:8px}
+        .practice-app--popup .practice-main{gap:10px}
+        .practice-app--popup .practice-side .practice-list-card{flex:0 0 auto}
+        .practice-app--popup .practice-task-list{max-height:268px}
+        .practice-app--popup .practice-list-head{padding:8px 10px;font-size:9px}
+        .practice-app--popup .practice-task{padding:8px 10px}
+        .practice-app--popup .practice-task-name{font-size:11px}
+        .practice-app--popup .practice-btn{padding:7px 8px;font-size:11px}
+        .practice-app--popup .practice-timer-card,.practice-app--popup .practice-notes-card{padding:14px 16px}
+        .practice-app--popup .practice-current{font-size:20px;margin-bottom:10px}
+        .practice-app--popup .practice-timer{font-size:48px;margin-bottom:2px}
+        .practice-app--popup .practice-status{margin-bottom:10px}
+        .practice-app--popup .practice-actions{margin-bottom:8px}
+        .practice-app--popup .practice-meta{gap:12px;padding:8px 10px;font-size:10px}
+        .practice-app--popup .practice-note-title{font-size:12px;margin-bottom:6px}
+        .practice-app--popup .practice-textarea{min-height:68px;padding:8px 10px;margin-bottom:8px}
+        .practice-app--popup .practice-calendar-card{margin-top:4px}
         @media (max-width:745px){.practice-main .practice-grid3.practice-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.practice-main .practice-done-btn{grid-column:1 / -1}}
         @media (max-width:650px){.practice-layout{grid-template-columns:1fr;grid-template-areas:'right' 'left' 'notes' 'calendar'}.practice-task-list{max-height:none}}
       `}</style>
@@ -485,7 +523,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                 })}
               </div>
             </div>
-            <div className="practice-grid3" style={{ marginTop: 'auto' }}>
+            <div className="practice-grid3">
               <button type="button" className="practice-btn" onClick={addTask}>
                 + Add
               </button>
@@ -530,6 +568,24 @@ export default function CourtInterpreterApp(): React.JSX.Element {
               </button>
               <button type="button" className="practice-btn" onClick={resetDefaults}>
                 Reset List
+              </button>
+            </div>
+            <div className="practice-grid2">
+              <button
+                type="button"
+                className="practice-btn"
+                onClick={goToPreviousDay}
+                disabled={!previousSessionDateKey}
+              >
+                ← Prev Day
+              </button>
+              <button
+                type="button"
+                className="practice-btn"
+                onClick={goToNextDay}
+                disabled={!nextSessionDateKey}
+              >
+                Next Day →
               </button>
             </div>
           </section>
