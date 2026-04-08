@@ -9,7 +9,6 @@ import {
   createTaskId,
   formatDuration,
   formatLosAngelesClock,
-  formatLosAngelesTimestamp,
   getLosAngelesDateString,
   reconcileSessionWithTemplate,
 } from "@shared/practice";
@@ -466,10 +465,16 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   };
 
   const play = async () => {
-    if (!isViewingToday || session.done || !active) return;
+    if (!isViewingToday || !active) return;
     try {
+      const saved = await rpc.saveState({ template, session });
+      setTemplate(saved.template);
+      setSession(saved.session);
       const next = await rpc.startSession();
-      if (next) setSession(next);
+      if (next) {
+        setTemplate(next.template);
+        setSession(next.session);
+      }
       setRunning(true);
     } catch (error) {
       console.error("Failed to start session", error);
@@ -478,7 +483,10 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   const stop = async () => {
     try {
       const next = await rpc.pauseSession();
-      if (next) setSession(next);
+      if (next) {
+        setTemplate(next.template);
+        setSession(next.session);
+      }
       setRunning(false);
     } catch (error) {
       console.error("Failed to pause session", error);
@@ -496,39 +504,21 @@ export default function CourtInterpreterApp(): React.JSX.Element {
           : task,
       ),
     }));
-  const completeAndNext = () => {
-    if (!active) return;
-    setSession((previous) => {
-      const index = taskIndex(previous.tasks, active.id);
-      if (index < 0) return previous;
-      const completedAt =
-        previous.tasks[index]?.completedAt ?? formatLosAngelesTimestamp();
-      const tasks = previous.tasks.map((task, taskIndexValue) =>
-        taskIndexValue === index
-          ? { ...task, remainingSeconds: 0, completedAt }
-          : task,
-      );
-
-      const nextIncomplete =
-        tasks.slice(index + 1).find((task) => task.completedAt === null) ??
-        tasks.find((task) => task.completedAt === null) ??
-        null;
-      if (!nextIncomplete) {
-        return {
-          ...previous,
-          tasks,
-          currentTaskId: tasks[tasks.length - 1]?.id ?? previous.currentTaskId,
-          done: true,
-        };
+  const completeAndNext = async () => {
+    if (!active || !isViewingToday) return;
+    try {
+      const saved = await rpc.saveState({ template, session });
+      setTemplate(saved.template);
+      setSession(saved.session);
+      const next = await rpc.completeCurrentTaskAndAdvance();
+      if (next) {
+        setTemplate(next.template);
+        setSession(next.session);
       }
-
-      return {
-        ...previous,
-        tasks,
-        currentTaskId: nextIncomplete.id,
-        done: false,
-      };
-    });
+      setRunning(false);
+    } catch (error) {
+      console.error("Failed to complete current task", error);
+    }
   };
 
   const resetDefaults = async () => {
@@ -923,7 +913,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                   className="practice-btn practice-btn-strong"
                   onClick={play}
                   disabled={
-                    !isViewingToday || running || session.done || !active
+                    !isViewingToday || running || !active
                   }
                 >
                   ▶ Play

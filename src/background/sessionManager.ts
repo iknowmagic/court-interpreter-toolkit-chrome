@@ -304,13 +304,33 @@ export async function startSession(): Promise<PracticeState | null> {
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();
 	}
-	if (sessionState.state?.session.done) {
+	if (!sessionState.state) {
+		return null;
+	}
+
+	const currentTask =
+		sessionState.state.session.tasks.find(
+			(task) => task.id === sessionState.state?.session.currentTaskId,
+		) ??
+		sessionState.state.session.tasks[0] ??
+		null;
+
+	if (!currentTask) {
 		sessionState.isRunning = false;
 		sessionState.isPaused = false;
 		stopTicker();
 		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 		return sessionState.state;
 	}
+
+	// Allow replaying completed tasks by resetting the selected task on start.
+	if (currentTask.completedAt !== null || currentTask.remainingSeconds <= 0) {
+		currentTask.completedAt = null;
+		currentTask.remainingSeconds = currentTask.duration * 60;
+	}
+	sessionState.state.session.currentTaskId = currentTask.id;
+	sessionState.state.session.done = false;
+	sessionState.state = await db.saveState(sessionState.state);
 
 	sessionState.isRunning = true;
 	sessionState.isPaused = false;
