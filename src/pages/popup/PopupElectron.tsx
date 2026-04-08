@@ -408,7 +408,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   return (
     <div className="practice-app">
       <style>{`
-        .practice-app{min-height:100vh;display:flex;flex-direction:column;background:${C.bg};color:${C.text}}
+        .practice-app{min-height:100%;display:flex;flex-direction:column;background:${C.bg};color:${C.text}}
         .practice-shell{width:min(1120px,calc(100% - 24px));margin:0 auto;display:flex;flex-direction:column;flex:1}
         .practice-layout{display:grid;grid-template-columns:300px minmax(0,760px);grid-template-areas:'left right' 'left notes' 'calendar .';align-items:stretch;justify-content:center;gap:14px;padding:14px;flex:1;min-height:0}
         .practice-task-list{flex:1;overflow:auto}
@@ -421,7 +421,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-btn-strong:hover:not(:disabled){background:${C.accentDk}!important;border-color:${C.accentDk}!important;color:#fff!important}
         .practice-current-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
         .practice-input:focus,.practice-textarea:focus{border-color:${C.accent}!important;outline:none}
-        .practice-loading{min-height:100vh;display:grid;place-items:center;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:${C.bg};color:${C.text};text-align:center}
+        .practice-loading{min-height:100%;display:grid;place-items:center;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:${C.bg};color:${C.text};text-align:center}
         @media (max-width:745px){.practice-main .practice-grid3.practice-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.practice-main .practice-done-btn{grid-column:1 / -1}}
         @media (max-width:650px){.practice-layout{grid-template-columns:1fr;grid-template-areas:'right' 'left' 'notes' 'calendar'}.practice-task-list{max-height:none}}
       `}</style>
