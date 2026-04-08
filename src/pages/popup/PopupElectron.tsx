@@ -127,7 +127,6 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   const saveTimer = useRef<number | null>(null);
   const noteChangedSinceSaveRef = useRef(false);
   const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
-  const latestToolbarStateRef = useRef({ template, session });
 
   useEffect(() => {
     const id = window.setInterval(
@@ -158,8 +157,12 @@ export default function CourtInterpreterApp(): React.JSX.Element {
               loaded.template[0]?.id ??
               "",
           );
-          const dates = await rpc.listSessionDates();
+          const [dates, runningState] = await Promise.all([
+            rpc.listSessionDates(),
+            rpc.getRunningState(),
+          ]);
           setSessionDates(dates);
+          setRunning(runningState.isRunning);
           noteChangedSinceSaveRef.current = false;
           setNoteSaveStatus("idle");
           setLastNoteSavedAt(null);
@@ -177,6 +180,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
 
   useEffect(() => {
     if (!ready) return;
+    if (running) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       void (async () => {
@@ -203,11 +207,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     return () => {
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     };
-  }, [ready, session, template]);
-
-  useEffect(() => {
-    latestToolbarStateRef.current = { template, session };
-  }, [session, template]);
+  }, [ready, running, session, template]);
 
   useEffect(() => {
     if (!ready) return;
@@ -221,31 +221,27 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   }, [ready, running, session, template]);
 
   useEffect(() => {
-    const stopToolbarRunning = () => {
-      if (!ready) return;
-      const latestState = latestToolbarStateRef.current;
-      void rpc.updateToolbarStatus(
-        latestState,
-        false,
-        { timestampMs: Date.now(), forceStopped: true },
-      );
-    };
-    const handleVisibilityChange = () => {
-      if (document.hidden) stopToolbarRunning();
-    };
-
-    window.addEventListener("pagehide", stopToolbarRunning);
-    window.addEventListener("beforeunload", stopToolbarRunning);
-    window.addEventListener("unload", stopToolbarRunning);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!ready || !running) return;
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        try {
+          const [nextState, runningState] = await Promise.all([
+            rpc.getSessionState(),
+            rpc.getRunningState(),
+          ]);
+          if (!nextState) return;
+          setTemplate(nextState.template);
+          setSession(nextState.session);
+          setRunning(runningState.isRunning);
+        } catch (error) {
+          console.error("Failed to sync running session state", error);
+        }
+      })();
+    }, 1000);
     return () => {
-      window.removeEventListener("pagehide", stopToolbarRunning);
-      window.removeEventListener("beforeunload", stopToolbarRunning);
-      window.removeEventListener("unload", stopToolbarRunning);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      stopToolbarRunning();
+      window.clearInterval(intervalId);
     };
-  }, [ready]);
+  }, [ready, running]);
 
   useEffect(() => {
     let cancelled = false;
@@ -324,51 +320,6 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       document.removeEventListener("keydown", handleEscape);
     };
   }, [showCalendarPopover]);
-
-  useEffect(() => {
-    if (!running) return;
-    const id = window.setInterval(() => {
-      setSession((previous) => {
-        if (previous.done || previous.tasks.length === 0) return previous;
-        const active = findTask(previous.tasks, previous.currentTaskId);
-        if (!active) return previous;
-        const index = taskIndex(previous.tasks, active.id);
-        if (index < 0) return previous;
-        const tasks = previous.tasks.map((task) =>
-          task.id === active.id
-            ? {
-                ...task,
-                remainingSeconds: Math.max(0, task.remainingSeconds - 1),
-              }
-            : task,
-        );
-        if ((tasks[index]?.remainingSeconds ?? 1) > 0)
-          return { ...previous, tasks };
-        const completedAt = active.completedAt ?? formatLosAngelesTimestamp();
-        const completedTasks = tasks.map((task) =>
-          task.id === active.id
-            ? { ...task, remainingSeconds: 0, completedAt }
-            : task,
-        );
-        const nextIncomplete =
-          completedTasks
-            .slice(index + 1)
-            .find((task) => task.completedAt === null) ??
-          completedTasks.find((task) => task.completedAt === null) ??
-          null;
-        const done = nextIncomplete === null;
-        return {
-          ...previous,
-          tasks: completedTasks,
-          currentTaskId: done
-            ? (completedTasks[completedTasks.length - 1]?.id ?? active.id)
-            : nextIncomplete.id,
-          done,
-        };
-      });
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [running]);
 
   const active = useMemo(
     () => findTask(session.tasks, session.currentTaskId),
@@ -450,6 +401,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   };
 
   const selectTask = (taskId: string) => {
+    void rpc.pauseSession().catch((error) => {
+      console.error("Failed to pause session before selecting task", error);
+    });
     setSelectedTaskId(taskId);
     setRunning(false);
     setSession((previous) => {
@@ -511,8 +465,25 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     setModal(null);
   };
 
-  const play = () => !session.done && active && setRunning(true);
-  const stop = () => setRunning(false);
+  const play = async () => {
+    if (!isViewingToday || session.done || !active) return;
+    try {
+      const next = await rpc.startSession();
+      if (next) setSession(next);
+      setRunning(true);
+    } catch (error) {
+      console.error("Failed to start session", error);
+    }
+  };
+  const stop = async () => {
+    try {
+      const next = await rpc.pauseSession();
+      if (next) setSession(next);
+      setRunning(false);
+    } catch (error) {
+      console.error("Failed to pause session", error);
+    }
+  };
   const resetCurrent = () =>
     active &&
     setSession((previous) => ({
@@ -563,6 +534,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   const resetDefaults = async () => {
     if (!window.confirm("Reset task template and today session to defaults?"))
       return;
+    await rpc.pauseSession().catch((error) => {
+      console.error("Failed to pause session before reset", error);
+    });
     setRunning(false);
     const next = await rpc.resetToDefaults();
     setTemplate(next.template);
@@ -584,6 +558,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   };
 
   const loadDate = async (dateKey: string) => {
+    await rpc.pauseSession().catch((error) => {
+      console.error("Failed to pause session before loading date", error);
+    });
     setRunning(false);
     const next = await rpc.loadStateByDate(dateKey);
     setTemplate(next.template);

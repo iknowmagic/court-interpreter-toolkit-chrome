@@ -17,7 +17,7 @@
 	"icons": {
 		"128": "icon.png"
 	},
-	"permissions": ["activeTab"],
+	"permissions": ["activeTab", "alarms"],
 	"content_scripts": [
 		{
 			"matches": ["http://*/*", "https://*/*", "<all_urls>"],

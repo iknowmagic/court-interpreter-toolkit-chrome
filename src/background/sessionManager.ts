@@ -1,4 +1,8 @@
-import type { PracticeState, PracticeTemplateTask } from "../shared/practice";
+import {
+	formatLosAngelesTimestamp,
+	type PracticeState,
+	type PracticeTemplateTask,
+} from "../shared/practice";
 import * as db from "../shared/indexedDB";
 
 export interface SessionManagerState {
@@ -15,6 +19,52 @@ let sessionState: SessionManagerState = {
 	pausedAtMs: 0,
 };
 let lastToolbarStatusUpdateMs = 0;
+const BACKGROUND_TICK_INTERVAL_MS = 1000;
+const BACKGROUND_TICK_ALARM = "practice-session-tick";
+let tickIntervalId: number | null = null;
+let tickInFlight = false;
+let lastTickAtMs = Date.now();
+
+function elapsedSecondsSinceLastTick(nowMs = Date.now()): number {
+	const elapsed = Math.floor((nowMs - lastTickAtMs) / 1000);
+	if (elapsed <= 0) return 0;
+	lastTickAtMs += elapsed * 1000;
+	return elapsed;
+}
+
+function ensureTickerRunning(): void {
+	if (tickIntervalId !== null) return;
+	lastTickAtMs = Date.now();
+	tickIntervalId = globalThis.setInterval(() => {
+		const elapsedSeconds = elapsedSecondsSinceLastTick();
+		void runBackgroundTick(elapsedSeconds);
+	}, BACKGROUND_TICK_INTERVAL_MS);
+	if (chrome.alarms) {
+		void chrome.alarms.create(BACKGROUND_TICK_ALARM, { periodInMinutes: 0.5 });
+	}
+}
+
+function stopTicker(): void {
+	if (tickIntervalId !== null) {
+		globalThis.clearInterval(tickIntervalId);
+		tickIntervalId = null;
+	}
+	if (chrome.alarms) {
+		void chrome.alarms.clear(BACKGROUND_TICK_ALARM);
+	}
+}
+
+async function runBackgroundTick(seconds: number): Promise<void> {
+	if (seconds <= 0 || !sessionState.isRunning || tickInFlight) return;
+	tickInFlight = true;
+	try {
+		await decrementTimer(seconds);
+	} catch (error) {
+		console.error("Failed to run background timer tick", error);
+	} finally {
+		tickInFlight = false;
+	}
+}
 
 function formatToolbarDuration(seconds: number): string {
 	const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -89,6 +139,14 @@ export async function initializeSessionManager(): Promise<void> {
 	// Initialize IndexedDB and load current state
 	await db.initDB();
 	sessionState.state = await db.loadState();
+	if (chrome.alarms) {
+		const existingAlarm = await chrome.alarms.get(BACKGROUND_TICK_ALARM);
+		if (existingAlarm) {
+			sessionState.isRunning = true;
+			sessionState.isPaused = false;
+			ensureTickerRunning();
+		}
+	}
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 }
 
@@ -114,9 +172,17 @@ export async function startSession(): Promise<PracticeState | null> {
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();
 	}
+	if (sessionState.state?.session.done) {
+		sessionState.isRunning = false;
+		sessionState.isPaused = false;
+		stopTicker();
+		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+		return sessionState.state;
+	}
 
 	sessionState.isRunning = true;
 	sessionState.isPaused = false;
+	ensureTickerRunning();
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
@@ -126,6 +192,7 @@ export async function pauseSession(): Promise<PracticeState | null> {
 	sessionState.isRunning = false;
 	sessionState.isPaused = true;
 	sessionState.pausedAtMs = Date.now();
+	stopTicker();
 
 	// Persist the current session
 	if (sessionState.state) {
@@ -138,8 +205,16 @@ export async function pauseSession(): Promise<PracticeState | null> {
 }
 
 export async function resumeSession(): Promise<PracticeState | null> {
+	if (sessionState.state?.session.done) {
+		sessionState.isRunning = false;
+		sessionState.isPaused = false;
+		stopTicker();
+		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+		return sessionState.state;
+	}
 	sessionState.isRunning = true;
 	sessionState.isPaused = false;
+	ensureTickerRunning();
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
@@ -151,12 +226,23 @@ export async function decrementTimer(
 	if (!sessionState.state || !sessionState.isRunning) {
 		return sessionState.state || null;
 	}
+	if (sessionState.state.session.done) {
+		sessionState.isRunning = false;
+		sessionState.isPaused = false;
+		stopTicker();
+		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+		return sessionState.state;
+	}
 
 	const currentTask = sessionState.state.session.tasks.find(
 		(t) => t.id === sessionState.state?.session.currentTaskId,
 	);
 
 	if (!currentTask) {
+		sessionState.isRunning = false;
+		sessionState.isPaused = false;
+		stopTicker();
+		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 		return sessionState.state;
 	}
 
@@ -168,20 +254,30 @@ export async function decrementTimer(
 
 	// If task is complete, mark it and move to next
 	if (currentTask.remainingSeconds === 0 && currentTask.completedAt === null) {
-		currentTask.completedAt = new Date().toISOString();
+		currentTask.completedAt = formatLosAngelesTimestamp();
+		const currentTaskIndex = sessionState.state.session.tasks.findIndex(
+			(task) => task.id === currentTask.id,
+		);
 
 		// Find next incomplete task
-		const nextTask = sessionState.state.session.tasks.find(
-			(t) => t.completedAt === null && t.id !== currentTask.id,
-		);
+		const nextTask =
+			sessionState.state.session.tasks
+				.slice(currentTaskIndex + 1)
+				.find((task) => task.completedAt === null) ??
+			sessionState.state.session.tasks.find((task) => task.completedAt === null) ??
+			null;
 
 		if (nextTask) {
 			sessionState.state.session.currentTaskId = nextTask.id;
 		} else {
 			// All tasks complete
 			sessionState.state.session.done = true;
-			sessionState.state.session.currentTaskId = null;
+			sessionState.state.session.currentTaskId =
+				sessionState.state.session.tasks[sessionState.state.session.tasks.length - 1]?.id ??
+				null;
 			sessionState.isRunning = false;
+			sessionState.isPaused = false;
+			stopTicker();
 		}
 	}
 
@@ -213,6 +309,7 @@ export async function newDay(
 
 	sessionState.isRunning = false;
 	sessionState.isPaused = false;
+	stopTicker();
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
@@ -222,6 +319,7 @@ export async function resetToDefaults(): Promise<PracticeState> {
 	sessionState.state = await db.resetToDefaults();
 	sessionState.isRunning = false;
 	sessionState.isPaused = false;
+	stopTicker();
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
@@ -237,6 +335,11 @@ export async function editTemplate(
 	// Save new template and reconcile current session
 	sessionState.state.template = template;
 	sessionState.state = await db.saveState(sessionState.state);
+	if (sessionState.state.session.done) {
+		sessionState.isRunning = false;
+		sessionState.isPaused = false;
+		stopTicker();
+	}
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
@@ -255,10 +358,23 @@ export async function updateToolbarStatus(
 	lastToolbarStatusUpdateMs = safeTimestamp;
 
 	sessionState.state = state;
-	sessionState.isRunning = forceStopped ? false : isRunning;
+	sessionState.isRunning =
+		!state.session.done && !forceStopped && Boolean(isRunning);
 	sessionState.isPaused = !sessionState.isRunning;
+	if (sessionState.isRunning) {
+		ensureTickerRunning();
+	} else {
+		stopTicker();
+	}
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 	return { ok: true };
+}
+
+export function handleBackgroundTickAlarm(alarm: chrome.alarms.Alarm): void {
+	if (alarm.name !== BACKGROUND_TICK_ALARM || !sessionState.isRunning) return;
+	const elapsedSeconds = elapsedSecondsSinceLastTick();
+	if (elapsedSeconds <= 1) return;
+	void runBackgroundTick(elapsedSeconds);
 }
 
 export function getRunningState(): { isRunning: boolean; isPaused: boolean } {

@@ -7,6 +7,10 @@ sessionManager.initializeSessionManager().catch((err) => {
 	console.error("Failed to initialize session manager:", err);
 });
 
+chrome.alarms.onAlarm.addListener((alarm) => {
+	sessionManager.handleBackgroundTickAlarm(alarm);
+});
+
 // Handle messages from UI pages (popup, options, panels, etc.)
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 	(async () => {
