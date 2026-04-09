@@ -1,6 +1,6 @@
 {
 	"name": "vite-web-extension",
-	"version": "1.4.0",
+	"version": "1.5.0",
 	"description": "A simple chrome & firefox extension template with Vite, React, TypeScript and Tailwind CSS.",
 	"license": "MIT",
 	"repository": {
@@ -14,10 +14,13 @@
 		"dev": "nodemon --config nodemon.chrome.json",
 		"dev:chrome": "nodemon --config nodemon.chrome.json",
 		"dev:firefox": "nodemon --config nodemon.firefox.json",
+		"ladle": "ladle serve",
+		"ladle:build": "ladle build",
 		"build:zip": "pnpm build:chrome && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\""
 	},
 	"type": "module",
 	"dependencies": {
+		"@ladle/react": "^5.1.1",
 		"react": "^19.1.0",
 		"react-dom": "^19.1.0",
 		"webextension-polyfill": "^0.12.0"

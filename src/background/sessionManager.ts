@@ -25,10 +25,34 @@ const CONTEXT_MENU_CURRENT = "practice-current-task";
 const CONTEXT_MENU_PLAY = "practice-play";
 const CONTEXT_MENU_STOP = "practice-stop";
 const CONTEXT_MENU_DONE = "practice-done";
+const CONTEXT_MENU_SETTINGS = "practice-settings";
+const CONTEXT_MENU_ALARM = "practice-settings-alarm";
+const SETTINGS_STORAGE_KEY = "session-manager-settings";
+const OFFSCREEN_ALARM_DOCUMENT = "alarm-player.html";
+const OFFSCREEN_ALARM_MESSAGE_TYPE = "PLAY_COMPLETION_ALARM";
 let tickIntervalId: number | null = null;
 let tickInFlight = false;
 let lastTickAtMs = Date.now();
 let contextMenuInitialized = false;
+let settingsLoaded = false;
+
+interface SessionManagerSettings {
+	completionAlarmEnabled: boolean;
+}
+
+const DEFAULT_SETTINGS: SessionManagerSettings = {
+	completionAlarmEnabled: false,
+};
+
+let sessionSettings: SessionManagerSettings = { ...DEFAULT_SETTINGS };
+
+type OffscreenApi = {
+	createDocument: (params: {
+		url: string;
+		reasons: string[];
+		justification: string;
+	}) => Promise<void>;
+};
 
 function elapsedSecondsSinceLastTick(nowMs = Date.now()): number {
 	const elapsed = Math.floor((nowMs - lastTickAtMs) / 1000);
@@ -110,6 +134,100 @@ function removeAllMenuItems(): Promise<void> {
 	});
 }
 
+function parseStoredSettings(raw: unknown): SessionManagerSettings {
+	const stored = (raw ?? {}) as Partial<SessionManagerSettings>;
+	return {
+		completionAlarmEnabled: Boolean(stored.completionAlarmEnabled),
+	};
+}
+
+async function ensureSettingsLoaded(): Promise<void> {
+	if (settingsLoaded) return;
+	if (!chrome.storage?.local) {
+		settingsLoaded = true;
+		return;
+	}
+
+	try {
+		const stored = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+		sessionSettings = parseStoredSettings(stored[SETTINGS_STORAGE_KEY]);
+	} catch (error) {
+		console.error("Failed to load session manager settings", error);
+		sessionSettings = { ...DEFAULT_SETTINGS };
+	}
+	settingsLoaded = true;
+}
+
+async function persistSettings(): Promise<void> {
+	if (!chrome.storage?.local) return;
+	try {
+		await chrome.storage.local.set({
+			[SETTINGS_STORAGE_KEY]: sessionSettings,
+		});
+	} catch (error) {
+		console.error("Failed to persist session manager settings", error);
+	}
+}
+
+async function setCompletionAlarmEnabled(enabled: boolean): Promise<void> {
+	await ensureSettingsLoaded();
+	sessionSettings = {
+		...sessionSettings,
+		completionAlarmEnabled: enabled,
+	};
+	await persistSettings();
+
+	if (!chrome.contextMenus || !contextMenuInitialized) return;
+	try {
+		await updateMenuItem(CONTEXT_MENU_ALARM, {
+			checked: enabled,
+		});
+	} catch (error) {
+		console.error("Failed to update completion alarm menu state", error);
+	}
+}
+
+async function ensureAlarmOffscreenDocument(): Promise<boolean> {
+	const offscreen = (chrome as unknown as { offscreen?: OffscreenApi }).offscreen;
+	if (!offscreen?.createDocument) return false;
+
+	try {
+		await offscreen.createDocument({
+			url: OFFSCREEN_ALARM_DOCUMENT,
+			reasons: ["AUDIO_PLAYBACK"],
+			justification: "Play a smooth completion alarm when a task completes.",
+		});
+		return true;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (
+			message.includes("Only a single offscreen document") ||
+			message.includes("already exists")
+		) {
+			return true;
+		}
+		console.error("Failed to initialize offscreen audio document", error);
+		return false;
+	}
+}
+
+async function maybePlayCompletionAlarm(): Promise<void> {
+	await ensureSettingsLoaded();
+	if (!sessionSettings.completionAlarmEnabled) return;
+
+	const offscreenReady = await ensureAlarmOffscreenDocument();
+	if (!offscreenReady) return;
+
+	try {
+		await chrome.runtime.sendMessage({
+			type: OFFSCREEN_ALARM_MESSAGE_TYPE,
+			target: "offscreen",
+		});
+	} catch (error) {
+		console.error("Failed to trigger completion alarm", error);
+	}
+}
+
 function formatToolbarDuration(seconds: number): string {
 	const safeSeconds = Math.max(0, Math.floor(seconds));
 	const minutes = Math.floor(safeSeconds / 60);
@@ -121,7 +239,7 @@ function compactBadgeTime(seconds: number): string {
 	const safeSeconds = Math.max(0, Math.floor(seconds));
 	const minutes = Math.floor(safeSeconds / 60);
 	const remainingSeconds = safeSeconds % 60;
-	if (minutes >= 100) return `${minutes}m`;
+	if (minutes >= 10) return `${minutes}m`;
 	return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
@@ -151,6 +269,7 @@ function getCurrentTaskSnapshot(state: PracticeState | null): {
 
 async function ensureContextMenuInitialized(): Promise<void> {
 	if (contextMenuInitialized || !chrome.contextMenus) return;
+	await ensureSettingsLoaded();
 
 	await removeAllMenuItems();
 	await createMenuItem({
@@ -173,6 +292,19 @@ async function ensureContextMenuInitialized(): Promise<void> {
 		id: CONTEXT_MENU_DONE,
 		title: "Done",
 		contexts: ["action"],
+	});
+	await createMenuItem({
+		id: CONTEXT_MENU_SETTINGS,
+		title: "Settings",
+		contexts: ["action"],
+	});
+	await createMenuItem({
+		id: CONTEXT_MENU_ALARM,
+		title: "Play smooth completion alarm",
+		contexts: ["action"],
+		parentId: CONTEXT_MENU_SETTINGS,
+		type: "checkbox",
+		checked: sessionSettings.completionAlarmEnabled,
 	});
 	contextMenuInitialized = true;
 }
@@ -206,6 +338,9 @@ async function refreshActionContextMenu(
 		});
 		await updateMenuItem(CONTEXT_MENU_DONE, {
 			enabled: canDone,
+		});
+		await updateMenuItem(CONTEXT_MENU_ALARM, {
+			checked: sessionSettings.completionAlarmEnabled,
 		});
 	} catch (error) {
 		if (!retry) {
@@ -268,6 +403,7 @@ async function refreshToolbarAction(
 }
 
 export async function initializeSessionManager(): Promise<void> {
+	await ensureSettingsLoaded();
 	// Initialize IndexedDB and load current state
 	await db.initDB();
 	sessionState.state = await db.loadState();
@@ -378,6 +514,7 @@ export async function decrementTimer(
 	if (!sessionState.state || !sessionState.isRunning) {
 		return sessionState.state || null;
 	}
+	let completedTask = false;
 	if (sessionState.state.session.done) {
 		sessionState.isRunning = false;
 		sessionState.isPaused = false;
@@ -406,6 +543,7 @@ export async function decrementTimer(
 
 	// If task is complete, mark it and move to next
 	if (currentTask.remainingSeconds === 0 && currentTask.completedAt === null) {
+		completedTask = true;
 		currentTask.completedAt = formatLosAngelesTimestamp();
 		const currentTaskIndex = sessionState.state.session.tasks.findIndex(
 			(task) => task.id === currentTask.id,
@@ -441,6 +579,9 @@ export async function decrementTimer(
 	// For now, persist on every change to ensure no data loss
 	sessionState.state = await db.saveState(sessionState.state);
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+	if (completedTask) {
+		await maybePlayCompletionAlarm();
+	}
 
 	return sessionState.state;
 }
@@ -506,6 +647,7 @@ export async function completeCurrentTaskAndAdvanceNoStart(): Promise<PracticeSt
 		sessionState.state = await db.loadState();
 	}
 	if (!sessionState.state) return null;
+	let completedTask = false;
 
 	sessionState.isRunning = false;
 	sessionState.isPaused = true;
@@ -532,6 +674,7 @@ export async function completeCurrentTaskAndAdvanceNoStart(): Promise<PracticeSt
 
 	const currentTaskIndex = session.tasks.findIndex((task) => task.id === currentTask.id);
 	if (currentTask.completedAt === null) {
+		completedTask = true;
 		currentTask.completedAt = formatLosAngelesTimestamp();
 		currentTask.remainingSeconds = 0;
 	}
@@ -554,6 +697,9 @@ export async function completeCurrentTaskAndAdvanceNoStart(): Promise<PracticeSt
 
 	sessionState.state = await db.saveState(sessionState.state);
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+	if (completedTask) {
+		await maybePlayCompletionAlarm();
+	}
 	return sessionState.state;
 }
 
@@ -593,7 +739,10 @@ export async function initializeActionContextMenu(): Promise<void> {
 	await refreshActionContextMenu(sessionState.state, sessionState.isRunning);
 }
 
-export async function handleActionContextMenuClick(menuItemId: string): Promise<void> {
+export async function handleActionContextMenuClick(
+	menuItemId: string,
+	checked?: boolean,
+): Promise<void> {
 	switch (menuItemId) {
 		case CONTEXT_MENU_PLAY:
 			await startSession();
@@ -603,6 +752,13 @@ export async function handleActionContextMenuClick(menuItemId: string): Promise<
 			break;
 		case CONTEXT_MENU_DONE:
 			await completeCurrentTaskAndAdvanceNoStart();
+			break;
+		case CONTEXT_MENU_ALARM:
+			await setCompletionAlarmEnabled(
+				typeof checked === "boolean"
+					? checked
+					: !sessionSettings.completionAlarmEnabled,
+			);
 			break;
 		default:
 			break;

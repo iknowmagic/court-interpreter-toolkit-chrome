@@ -33,11 +33,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.contextMenus.onClicked.addListener((info) => {
-	void sessionManager.handleActionContextMenuClick(String(info.menuItemId));
+	void sessionManager.handleActionContextMenuClick(
+		String(info.menuItemId),
+		info.checked,
+	);
 });
 
 // Handle messages from UI pages (popup, options, panels, etc.)
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+	if (!request || typeof request.action !== "string") {
+		return false;
+	}
+
 	(async () => {
 		try {
 			let response: unknown;
