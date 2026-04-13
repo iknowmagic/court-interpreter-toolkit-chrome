@@ -42,3 +42,9 @@
 - If code mutates session/template without pausing first, UI and background timer can drift.
 - Reconciliation is id-based; changing task ids is equivalent to delete+add.
 - `loadStateByDate` for missing dates returns a derived in-memory session unless later saved.
+
+## Changelog Standard
+- Keep `CHANGELOG.md` updated per release.
+- Use version sections with date (`## [x.y.z] - YYYY-MM-DD`).
+- Keep entries short and grouped by `Added`, `Changed`, `Fixed`, and `Docs`.
+- Include commit references when they help track major release work.
