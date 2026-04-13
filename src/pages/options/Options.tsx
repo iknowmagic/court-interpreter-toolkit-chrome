@@ -1,411 +1,149 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import heroImage from "@assets/img/options-hero.png";
 import * as rpc from "@utils/chromeRPC";
-import type {
-  PracticeState,
-  PracticeTemplateTask,
-} from "@shared/practice";
-import { formatDuration, formatLosAngelesClock } from "@shared/practice";
-import SessionTimer from "@components/SessionTimer";
-import TaskCustomizer from "@components/TaskCustomizer";
 import "@pages/options/Options.css";
 
-const TIMER_INTERVAL_MS = 1000; // 1 second
+const SAVE_INDICATOR_TIMEOUT_MS = 1800;
 
-export default function Options() {
-  const [state, setState] = useState<PracticeState | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [showTaskCustomizer, setShowTaskCustomizer] = useState(false);
-  const [taskNote, setTaskNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
+function getExtensionVersion(): string {
+  try {
+    const manifest = chrome.runtime?.getManifest?.();
+    return manifest?.version ? `v${manifest.version}` : "v1.5.0";
+  } catch {
+    return "v1.5.0";
+  }
+}
+
+export default function Options(): React.JSX.Element {
+  const [alarmEnabled, setAlarmEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showSaved, setShowSaved] = useState(false);
+  const hideSavedTimer = useRef<number | null>(null);
+  const versionLabel = useMemo(() => getExtensionVersion(), []);
 
-  // Load initial state
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    void (async () => {
       try {
-        const [initialState, runningState] = await Promise.all([
-          rpc.getSessionState(),
-          rpc.getRunningState(),
-        ]);
-        setState(initialState);
-        setIsRunning(runningState.isRunning);
-        setIsPaused(runningState.isPaused);
-        setLoading(false);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setError(message);
-        setLoading(false);
+        const enabled = await rpc.getCompletionAlarmSetting();
+        if (!cancelled) {
+          setAlarmEnabled(enabled);
+          setError(null);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load settings.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
+
+    return () => {
+      cancelled = true;
+      if (hideSavedTimer.current !== null) {
+        window.clearTimeout(hideSavedTimer.current);
+      }
+    };
   }, []);
 
-  // Update clock every second
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const updateAlarm = async (enabled: boolean) => {
+    setAlarmEnabled(enabled);
+    setError(null);
 
-  // Update task note from current session
-  useEffect(() => {
-    if (state && state.session.currentTaskId) {
-      const currentTask = state.session.tasks.find(
-        (t) => t.id === state.session.currentTaskId,
+    try {
+      const nextEnabled = await rpc.setCompletionAlarmSetting(enabled);
+      setAlarmEnabled(nextEnabled);
+      setShowSaved(true);
+      if (hideSavedTimer.current !== null) {
+        window.clearTimeout(hideSavedTimer.current);
+      }
+      hideSavedTimer.current = window.setTimeout(() => {
+        setShowSaved(false);
+      }, SAVE_INDICATOR_TIMEOUT_MS);
+    } catch (updateError) {
+      setAlarmEnabled((previous) => !previous);
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Failed to update setting.",
       );
-      setTaskNote(currentTask?.note || "");
     }
-  }, [state?.session.currentTaskId, state?.session.tasks]);
-
-  // Timer decrement loop
-  useEffect(() => {
-    if (!isRunning) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      (async () => {
-        try {
-          const newState = await rpc.decrementTimer(1);
-          setState(newState);
-        } catch (err) {
-          console.error("Failed to decrement timer:", err);
-        }
-      })();
-    }, TIMER_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [isRunning]);
-
-  // Auto-save session on state change (debounced via effect cleanup)
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (state && isRunning) {
-        (async () => {
-          try {
-            await rpc.saveSession(state);
-          } catch (err) {
-            console.error("Failed to auto-save session:", err);
-          }
-        })();
-      }
-    }, 350);
-
-    return () => clearTimeout(timeout);
-  }, [state, isRunning]);
-
-  const stopTimerForMutation = useCallback(async () => {
-    if (!isRunning) return;
-    try {
-      const pausedState = await rpc.pauseSession();
-      if (pausedState) {
-        setState(pausedState);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsRunning(false);
-      setIsPaused(false);
-    }
-  }, [isRunning]);
-
-  const handleStartSession = useCallback(async () => {
-    try {
-      const updatedState = await rpc.startSession();
-      setState(updatedState);
-      setIsRunning(true);
-      setIsPaused(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  const handlePauseSession = useCallback(async () => {
-    try {
-      const updatedState = await rpc.pauseSession();
-      setState(updatedState);
-      setIsRunning(false);
-      setIsPaused(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  const handleResumeSession = useCallback(async () => {
-    try {
-      const updatedState = await rpc.resumeSession();
-      setState(updatedState);
-      setIsRunning(true);
-      setIsPaused(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  const handleTaskNoteChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newNote = e.target.value;
-      setTaskNote(newNote);
-
-      // Update state and persist
-      if (state && state.session.currentTaskId) {
-        const updatedSession = { ...state.session };
-        const currentTask = updatedSession.tasks.find(
-          (t) => t.id === state.session.currentTaskId,
-        );
-        if (currentTask) {
-          currentTask.note = newNote;
-        }
-        const newState = { ...state, session: updatedSession };
-        setState(newState);
-      }
-    },
-    [state],
-  );
-
-  const handleNewDay = useCallback(async () => {
-    try {
-      await stopTimerForMutation();
-      const newState = await rpc.newDay(state?.template);
-      setState(newState);
-      setIsRunning(false);
-      setIsPaused(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [state?.template, stopTimerForMutation]);
-
-  const handleResetToDefaults = useCallback(async () => {
-    if (
-      !window.confirm(
-        "Are you sure you want to reset the list? All progress data across all days will be deleted. This action cannot be undone.",
-      )
-    ) {
-      return;
-    }
-    try {
-      await stopTimerForMutation();
-      const newState = await rpc.resetToDefaults();
-      setState(newState);
-      setIsRunning(false);
-      setIsPaused(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [stopTimerForMutation]);
-
-  const handleSaveTemplate = useCallback(
-    async (template: PracticeTemplateTask[]) => {
-      try {
-        await stopTimerForMutation();
-        const newState = await rpc.editTemplate(template);
-        setState(newState);
-        setIsRunning(false);
-        setIsPaused(false);
-        setShowTaskCustomizer(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [stopTimerForMutation],
-  );
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-8">
-        <div className="max-w-2xl mx-auto">
-          <div className="text-center text-gray-600">Loading...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!state) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-8">
-        <div className="max-w-2xl mx-auto">
-          <div className="text-center text-red-600">
-            Failed to load session state
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const currentTask = state.session.tasks.find(
-    (t) => t.id === state.session.currentTaskId,
-  );
-  const taskCount = state.session.tasks.length;
-  const completedCount = state.session.tasks.filter(
-    (t) => t.completedAt !== null,
-  ).length;
-  const remainingMs = (currentTask?.remainingSeconds || 0) * 1000;
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold text-gray-800">
-              Court Interpreter Practice
-            </h1>
-            <div className="text-lg text-gray-600 font-mono">
-              {formatLosAngelesClock(currentTime)}
-            </div>
+    <div className="options-page">
+      <header className="options-header">
+        <h1 className="header-title">Court Interpreter Toolkit</h1>
+        <div className="header-sub">Options</div>
+      </header>
+
+      <div className="hero-frame">
+        <img
+          src={heroImage}
+          alt="Court Interpreter Toolkit options hero"
+          className="hero-image"
+        />
+      </div>
+
+      <main className="options-content">
+        <h2 className="section-label">Sound &amp; Feedback</h2>
+
+        <section className="option-row" aria-busy={loading}>
+          <div className="option-info">
+            <h3 className="option-title">Play smooth completion alarm</h3>
+            <p className="option-desc">
+              A gentle chime plays each time you mark a task as done. Good for
+              flow. Annoying if your cat is sleeping nearby.
+            </p>
           </div>
+
+          <div className="toggle-wrap">
+            <span className="toggle-status" id="alarm-status">
+              {alarmEnabled ? "On" : "Off"}
+            </span>
+            <label className="toggle" aria-label="Play smooth completion alarm">
+              <input
+                type="checkbox"
+                checked={alarmEnabled}
+                disabled={loading}
+                onChange={(event) => {
+                  void updateAlarm(event.target.checked);
+                }}
+              />
+              <span className="track" />
+              <span className="thumb" />
+            </label>
+          </div>
+        </section>
+
+        <div
+          className={`save-status${showSaved ? " visible" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          Saved.
         </div>
 
-        {/* Error Display */}
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+        {error ? (
+          <div className="options-error" role="alert">
             {error}
           </div>
-        )}
+        ) : null}
+      </main>
 
-        {/* Timer Display */}
-        <div className="bg-cyan-50 rounded-lg shadow p-6 mb-6">
-          {currentTask ? (
-            <>
-              <div className="text-center mb-4">
-                <h2 className="text-xl font-semibold text-gray-800">
-                  {currentTask.name}
-                </h2>
-                <p className="text-sm text-gray-600">
-                  Task {completedCount + 1} of {taskCount}
-                </p>
-              </div>
-
-              <SessionTimer
-                remainingMs={remainingMs}
-                isRunning={isRunning}
-                totalMs={(currentTask.duration || 0) * 60000}
-              />
-
-              <div className="mt-6 flex gap-2 justify-center">
-                {!isRunning && !isPaused && (
-                  <button
-                    onClick={handleStartSession}
-                    className="px-6 py-2 bg-cyan-600 text-white rounded hover:bg-cyan-700 transition"
-                  >
-                    Start
-                  </button>
-                )}
-                {isRunning && (
-                  <button
-                    onClick={handlePauseSession}
-                    className="px-6 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition"
-                  >
-                    Pause
-                  </button>
-                )}
-                {isPaused && (
-                  <button
-                    onClick={handleResumeSession}
-                    className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition"
-                  >
-                    Resume
-                  </button>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="text-center text-gray-600">
-              <p className="mb-4">All tasks completed!</p>
-              <button
-                onClick={handleNewDay}
-                className="px-6 py-2 bg-cyan-600 text-white rounded hover:bg-cyan-700 transition"
-              >
-                Start New Day
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Task Notes */}
-        {currentTask && (
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <label className="block text-lg font-semibold text-gray-800 mb-2">
-              Task Notes
-            </label>
-            <textarea
-              value={taskNote}
-              onChange={handleTaskNoteChange}
-              placeholder="Add notes for this task..."
-              className="w-full h-24 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-cyan-600"
-            />
-          </div>
-        )}
-
-        {/* Control Buttons */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex gap-3 flex-wrap">
-            <button
-              onClick={() => setShowTaskCustomizer(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-            >
-              Edit Tasks
-            </button>
-            <button
-              onClick={handleNewDay}
-              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition"
-            >
-              New Day
-            </button>
-            <button
-              onClick={handleResetToDefaults}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
-            >
-              Reset to Defaults
-            </button>
-          </div>
-        </div>
-
-        {/* Task List */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Tasks</h3>
-          <div className="space-y-2">
-            {state.session.tasks.map((task) => (
-              <div
-                key={task.id}
-                className={`p-3 rounded ${
-                  task.completedAt
-                    ? "bg-green-50 border-l-4 border-green-500"
-                    : task.id === state.session.currentTaskId
-                      ? "bg-cyan-50 border-l-4 border-cyan-500"
-                      : "bg-gray-50 border-l-4 border-gray-200"
-                }`}
-              >
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-gray-800">{task.name}</span>
-                  <span className="text-sm text-gray-600">
-                    {task.completedAt
-                      ? "✓ Done"
-                      : formatDuration(task.remainingSeconds)}
-                  </span>
-                </div>
-                {task.note && (
-                  <div className="text-sm text-gray-600 mt-1">
-                    Note: {task.note}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Task Customizer Modal */}
-        {showTaskCustomizer && (
-          <TaskCustomizer
-            template={state.template}
-            onSave={handleSaveTemplate}
-            onCancel={() => setShowTaskCustomizer(false)}
-            onMutate={stopTimerForMutation}
-          />
-        )}
-      </div>
+      <footer className="options-footer">
+        <span className="footer-name">Court Interpreter Toolkit</span>
+        <span className="footer-version">{versionLabel}</span>
+      </footer>
     </div>
   );
 }

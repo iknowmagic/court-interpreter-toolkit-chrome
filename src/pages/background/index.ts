@@ -99,6 +99,16 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 					response = sessionManager.getRunningState();
 					break;
 
+				case "getCompletionAlarmSetting":
+					response = await sessionManager.getCompletionAlarmSetting();
+					break;
+
+				case "setCompletionAlarmSetting":
+					response = await sessionManager.setCompletionAlarmSetting(
+						Boolean(request.enabled),
+					);
+					break;
+
 				case "updateToolbarStatus":
 					response = await sessionManager.updateToolbarStatus(
 						request.state,

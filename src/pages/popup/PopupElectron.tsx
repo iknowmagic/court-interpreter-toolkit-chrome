@@ -723,7 +723,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   if (!ready)
     return (
       <div className="practice-loading">
-        Court Interpreter
+        Court Interpreter Toolkit
         <br />
         Loading practice session...
       </div>
@@ -793,7 +793,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       <div className="practice-shell">
         <header className="practice-header">
           <div>
-            <div className="practice-title">COURT INTERPRETER</div>
+            <div className="practice-title">COURT INTERPRETER TOOLKIT</div>
             <div className="practice-subtitle">Daily Practice Session</div>
             <div className="practice-date">{sessionDateHeaderLabel}</div>
           </div>

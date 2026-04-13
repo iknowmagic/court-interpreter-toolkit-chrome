@@ -111,7 +111,9 @@ describe("PopupElectron", () => {
     expect(screen.getByRole("button", { name: "▶ Play" })).toBeDisabled();
     expect(screen.getByPlaceholderText("What did you practice?")).toBeDisabled();
 
-    const root = screen.getByText("COURT INTERPRETER").closest(".practice-app");
+    const root = screen
+      .getByText("COURT INTERPRETER TOOLKIT")
+      .closest(".practice-app");
     expect(root).toHaveClass("practice-app--history");
   });
 

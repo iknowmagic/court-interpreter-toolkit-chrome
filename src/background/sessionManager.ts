@@ -25,8 +25,6 @@ const CONTEXT_MENU_CURRENT = "practice-current-task";
 const CONTEXT_MENU_PLAY = "practice-play";
 const CONTEXT_MENU_STOP = "practice-stop";
 const CONTEXT_MENU_DONE = "practice-done";
-const CONTEXT_MENU_SETTINGS = "practice-settings";
-const CONTEXT_MENU_ALARM = "practice-settings-alarm";
 const SETTINGS_STORAGE_KEY = "session-manager-settings";
 const OFFSCREEN_ALARM_DOCUMENT = "alarm-player.html";
 const OFFSCREEN_ALARM_MESSAGE_TYPE = "PLAY_COMPLETION_ALARM";
@@ -176,15 +174,6 @@ async function setCompletionAlarmEnabled(enabled: boolean): Promise<void> {
 		completionAlarmEnabled: enabled,
 	};
 	await persistSettings();
-
-	if (!chrome.contextMenus || !contextMenuInitialized) return;
-	try {
-		await updateMenuItem(CONTEXT_MENU_ALARM, {
-			checked: enabled,
-		});
-	} catch (error) {
-		console.error("Failed to update completion alarm menu state", error);
-	}
 }
 
 async function ensureAlarmOffscreenDocument(): Promise<boolean> {
@@ -293,19 +282,6 @@ async function ensureContextMenuInitialized(): Promise<void> {
 		title: "Done",
 		contexts: ["action"],
 	});
-	await createMenuItem({
-		id: CONTEXT_MENU_SETTINGS,
-		title: "Settings",
-		contexts: ["action"],
-	});
-	await createMenuItem({
-		id: CONTEXT_MENU_ALARM,
-		title: "Play smooth completion alarm",
-		contexts: ["action"],
-		parentId: CONTEXT_MENU_SETTINGS,
-		type: "checkbox",
-		checked: sessionSettings.completionAlarmEnabled,
-	});
 	contextMenuInitialized = true;
 }
 
@@ -338,9 +314,6 @@ async function refreshActionContextMenu(
 		});
 		await updateMenuItem(CONTEXT_MENU_DONE, {
 			enabled: canDone,
-		});
-		await updateMenuItem(CONTEXT_MENU_ALARM, {
-			checked: sessionSettings.completionAlarmEnabled,
 		});
 	} catch (error) {
 		if (!retry) {
@@ -753,13 +726,6 @@ export async function handleActionContextMenuClick(
 		case CONTEXT_MENU_DONE:
 			await completeCurrentTaskAndAdvanceNoStart();
 			break;
-		case CONTEXT_MENU_ALARM:
-			await setCompletionAlarmEnabled(
-				typeof checked === "boolean"
-					? checked
-					: !sessionSettings.completionAlarmEnabled,
-			);
-			break;
 		default:
 			break;
 	}
@@ -770,4 +736,16 @@ export function getRunningState(): { isRunning: boolean; isPaused: boolean } {
 		isRunning: sessionState.isRunning,
 		isPaused: sessionState.isPaused,
 	};
+}
+
+export async function getCompletionAlarmSetting(): Promise<boolean> {
+	await ensureSettingsLoaded();
+	return sessionSettings.completionAlarmEnabled;
+}
+
+export async function setCompletionAlarmSetting(
+	enabled: boolean,
+): Promise<boolean> {
+	await setCompletionAlarmEnabled(enabled);
+	return sessionSettings.completionAlarmEnabled;
 }

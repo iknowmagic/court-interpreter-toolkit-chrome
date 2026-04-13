@@ -97,6 +97,16 @@ export async function getRunningState(): Promise<{
 	});
 }
 
+export async function getCompletionAlarmSetting(): Promise<boolean> {
+	return sendMessage<boolean>({ action: "getCompletionAlarmSetting" });
+}
+
+export async function setCompletionAlarmSetting(
+	enabled: boolean,
+): Promise<boolean> {
+	return sendMessage<boolean>({ action: "setCompletionAlarmSetting", enabled });
+}
+
 export async function updateToolbarStatus(
 	state: PracticeState,
 	isRunning: boolean,
