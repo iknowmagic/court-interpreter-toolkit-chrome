@@ -79,7 +79,7 @@ importers:
         specifier: ^6.2.5
         version: 6.2.5
       fs-extra:
-        specifier: ^11.3.2
+        specifier: ^11.3.4
         version: 11.3.4
       jsdom:
         specifier: ^29.0.2
