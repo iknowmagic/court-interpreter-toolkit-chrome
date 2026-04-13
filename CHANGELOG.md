@@ -17,6 +17,8 @@ All notable changes to this project are documented here.
 - `Reset List` now performs a hard reset: all historical progress is deleted and defaults are restored.
 - Reset confirmation message now explicitly warns about destructive, irreversible data loss.
 - Past-day history mode now uses gray monochrome disabled styling for controls and note input.
+- Replaced the extension Options page with the new dedicated settings design, including hero image support and a single alarm toggle flow backed by background settings.
+- Removed duplicate alarm controls from the action context menu so alarm configuration lives in Options.
 
 ### Fixed
 - Duration edits now correctly reset `remainingSeconds` to full new duration without requiring manual `Reset Task`.
