@@ -324,7 +324,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       const panelRect =
         calendarPopoverPanelRef.current?.getBoundingClientRect();
       const popoverWidth = panelRect?.width ?? 280;
-      const popoverHeight = panelRect?.height ?? 308;
+      const popoverHeight = panelRect?.height ?? 360;
       const maxLeft = Math.max(
         viewportPad,
         window.innerWidth - popoverWidth - viewportPad,
@@ -371,10 +371,14 @@ export default function CourtInterpreterApp(): React.JSX.Element {
 
     updatePosition();
     const rafId = window.requestAnimationFrame(updatePosition);
+    const rafIdTwo = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(updatePosition);
+    });
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
       window.cancelAnimationFrame(rafId);
+      window.cancelAnimationFrame(rafIdTwo);
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
@@ -1053,18 +1057,19 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         </main>
       </div>
 
-      {showCalendarPopover && calendarPopoverPosition
+      {showCalendarPopover
         ? createPortal(
             <div
               id="practice-calendar-popover"
               ref={calendarPopoverPanelRef}
               className="practice-calendar-popover"
-              data-placement={calendarPopoverPosition.placement}
+              data-placement={calendarPopoverPosition?.placement ?? "below"}
               role="dialog"
               aria-label="Session calendar"
               style={{
-                top: `${calendarPopoverPosition.top}px`,
-                left: `${calendarPopoverPosition.left}px`,
+                top: `${calendarPopoverPosition?.top ?? -10000}px`,
+                left: `${calendarPopoverPosition?.left ?? -10000}px`,
+                visibility: calendarPopoverPosition ? "visible" : "hidden",
               }}
             >
               <div className="practice-popover-title">Session Calendar</div>
