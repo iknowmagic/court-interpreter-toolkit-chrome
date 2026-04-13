@@ -24,10 +24,10 @@ textarea {
 .practice-title {
 	font-family: Georgia, "Times New Roman", serif;
 	font-size: 26px;
-	font-weight: 600;
+	font-weight: 700;
 	font-style: italic;
-	color: #ede8de;
-	line-height: 1;
+	color: #fdfaf4;
+	line-height: 1.1;
 }
 
 .practice-subtitle {

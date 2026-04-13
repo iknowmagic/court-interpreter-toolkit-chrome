@@ -112,7 +112,7 @@ describe("PopupElectron", () => {
     expect(screen.getByPlaceholderText("What did you practice?")).toBeDisabled();
 
     const root = screen
-      .getByText("COURT INTERPRETER TOOLKIT")
+      .getByText("Court Interpreter Toolkit")
       .closest(".practice-app");
     expect(root).toHaveClass("practice-app--history");
   });

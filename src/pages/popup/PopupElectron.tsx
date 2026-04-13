@@ -321,7 +321,8 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     const viewportPad = 8;
     const updatePosition = () => {
       const anchorRect = anchor.getBoundingClientRect();
-      const panelRect = calendarPopoverPanelRef.current?.getBoundingClientRect();
+      const panelRect =
+        calendarPopoverPanelRef.current?.getBoundingClientRect();
       const popoverWidth = panelRect?.width ?? 280;
       const popoverHeight = panelRect?.height ?? 308;
       const maxLeft = Math.max(
@@ -763,7 +764,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-loading{min-height:100%;display:grid;place-items:center;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:${C.bg};color:${C.text};text-align:center}
         .practice-app--popup .practice-shell{width:min(620px,100%);padding:0}
         .practice-app--popup .practice-layout{grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);grid-template-areas:'left right' 'left notes';gap:8px;padding:8px}
-        .practice-app--popup .practice-header{padding:10px 16px 8px;gap:12px}
+        .practice-app--popup .practice-header{padding:12px 16px 10px;gap:12px}
         .practice-app--popup .practice-title{font-size:22px}
         .practice-app--popup .practice-subtitle{font-size:9px;letter-spacing:0.16em}
         .practice-app--popup .practice-date,.practice-app--popup .practice-summary{font-size:11px}
@@ -793,7 +794,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
       <div className="practice-shell">
         <header className="practice-header">
           <div>
-            <div className="practice-title">COURT INTERPRETER TOOLKIT</div>
+            <div className="practice-title">Court Interpreter Toolkit</div>
             <div className="practice-subtitle">Daily Practice Session</div>
             <div className="practice-date">{sessionDateHeaderLabel}</div>
           </div>
@@ -1104,7 +1105,8 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                     const isCompleteDay = completedSessionDateSet.has(
                       cell.dateKey,
                     );
-                    const isSelectable = hasData || cell.dateKey === todayDateKey;
+                    const isSelectable =
+                      hasData || cell.dateKey === todayDateKey;
                     return (
                       <button
                         key={cell.dateKey}
