@@ -16,7 +16,9 @@
 		"dev:firefox": "nodemon --config nodemon.firefox.json",
 		"ladle": "ladle serve",
 		"ladle:build": "ladle build",
-		"build:zip": "pnpm build:chrome && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\""
+		"build:zip": "pnpm build:chrome && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\"",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"type": "module",
 	"dependencies": {
@@ -28,6 +30,8 @@
 	"devDependencies": {
 		"@crxjs/vite-plugin": "^2.0.3",
 		"@tailwindcss/vite": "^4.1.11",
+		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/react": "^16.3.2",
 		"@types/chrome": "^0.1.11",
 		"@types/node": "^24.9.1",
 		"@types/react": "^19.1.8",
@@ -42,12 +46,15 @@
 		"eslint-plugin-jsx-a11y": "^6.10.2",
 		"eslint-plugin-react": "^7.37.5",
 		"eslint-plugin-react-hooks": "^5.2.0",
+		"fake-indexeddb": "^6.2.5",
 		"fs-extra": "^11.3.2",
+		"jsdom": "^29.0.2",
 		"nodemon": "^3.1.10",
 		"tailwindcss": "^4.1.16",
 		"ts-node": "^10.9.2",
 		"typescript": "^5.8.3",
 		"vite": "^6.3.5",
-		"vite-tsconfig-paths": "^5.1.4"
+		"vite-tsconfig-paths": "^5.1.4",
+		"vitest": "^4.1.4"
 	}
 }

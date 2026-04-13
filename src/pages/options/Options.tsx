@@ -3,7 +3,6 @@ import * as rpc from "@utils/chromeRPC";
 import type {
   PracticeState,
   PracticeTemplateTask,
-  PracticeSession,
 } from "@shared/practice";
 import { formatDuration, formatLosAngelesClock } from "@shared/practice";
 import SessionTimer from "@components/SessionTimer";
@@ -26,8 +25,13 @@ export default function Options() {
   useEffect(() => {
     (async () => {
       try {
-        const initialState = await rpc.getSessionState();
+        const [initialState, runningState] = await Promise.all([
+          rpc.getSessionState(),
+          rpc.getRunningState(),
+        ]);
         setState(initialState);
+        setIsRunning(runningState.isRunning);
+        setIsPaused(runningState.isPaused);
         setLoading(false);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -92,6 +96,21 @@ export default function Options() {
     return () => clearTimeout(timeout);
   }, [state, isRunning]);
 
+  const stopTimerForMutation = useCallback(async () => {
+    if (!isRunning) return;
+    try {
+      const pausedState = await rpc.pauseSession();
+      if (pausedState) {
+        setState(pausedState);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsRunning(false);
+      setIsPaused(false);
+    }
+  }, [isRunning]);
+
   const handleStartSession = useCallback(async () => {
     try {
       const updatedState = await rpc.startSession();
@@ -148,6 +167,7 @@ export default function Options() {
 
   const handleNewDay = useCallback(async () => {
     try {
+      await stopTimerForMutation();
       const newState = await rpc.newDay(state?.template);
       setState(newState);
       setIsRunning(false);
@@ -155,10 +175,18 @@ export default function Options() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [state?.template]);
+  }, [state?.template, stopTimerForMutation]);
 
   const handleResetToDefaults = useCallback(async () => {
+    if (
+      !window.confirm(
+        "Are you sure you want to reset the list? All progress data across all days will be deleted. This action cannot be undone.",
+      )
+    ) {
+      return;
+    }
     try {
+      await stopTimerForMutation();
       const newState = await rpc.resetToDefaults();
       setState(newState);
       setIsRunning(false);
@@ -166,19 +194,22 @@ export default function Options() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [stopTimerForMutation]);
 
   const handleSaveTemplate = useCallback(
     async (template: PracticeTemplateTask[]) => {
       try {
+        await stopTimerForMutation();
         const newState = await rpc.editTemplate(template);
         setState(newState);
+        setIsRunning(false);
+        setIsPaused(false);
         setShowTaskCustomizer(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [],
+    [stopTimerForMutation],
   );
 
   if (loading) {
@@ -371,6 +402,7 @@ export default function Options() {
             template={state.template}
             onSave={handleSaveTemplate}
             onCancel={() => setShowTaskCustomizer(false)}
+            onMutate={stopTimerForMutation}
           />
         )}
       </div>

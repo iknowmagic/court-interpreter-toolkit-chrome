@@ -6,17 +6,25 @@ interface TaskCustomizerProps {
   template: PracticeTemplateTask[];
   onSave: (template: PracticeTemplateTask[]) => void;
   onCancel: () => void;
+  onMutate?: () => void | Promise<void>;
 }
 
 export default function TaskCustomizer({
   template,
   onSave,
   onCancel,
+  onMutate,
 }: TaskCustomizerProps) {
   const [tasks, setTasks] = useState<PracticeTemplateTask[]>(template);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const handleAddTask = () => {
+  const stopTimerBeforeMutating = async () => {
+    if (!onMutate) return;
+    await onMutate();
+  };
+
+  const handleAddTask = async () => {
+    await stopTimerBeforeMutating();
     const newTask: PracticeTemplateTask = {
       id: createTaskId(),
       name: "New Task",
@@ -25,7 +33,8 @@ export default function TaskCustomizer({
     setTasks([...tasks, newTask]);
   };
 
-  const handleDeleteTask = (id: string) => {
+  const handleDeleteTask = async (id: string) => {
+    await stopTimerBeforeMutating();
     setTasks(tasks.filter((t) => t.id !== id));
   };
 
@@ -46,7 +55,7 @@ export default function TaskCustomizer({
     );
   };
 
-  const handleMoveTask = (index: number, direction: "up" | "down") => {
+  const handleMoveTask = async (index: number, direction: "up" | "down") => {
     if (
       (direction === "up" && index === 0) ||
       (direction === "down" && index === tasks.length - 1)
@@ -54,6 +63,7 @@ export default function TaskCustomizer({
       return;
     }
 
+    await stopTimerBeforeMutating();
     const newTasks = [...tasks];
     const swapIndex = direction === "up" ? index - 1 : index + 1;
     [newTasks[index], newTasks[swapIndex]] = [
@@ -63,7 +73,8 @@ export default function TaskCustomizer({
     setTasks(newTasks);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    await stopTimerBeforeMutating();
     onSave(tasks);
   };
 
@@ -132,9 +143,9 @@ export default function TaskCustomizer({
                         Done
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           setEditingId(null);
-                          handleDeleteTask(task.id);
+                          await handleDeleteTask(task.id);
                         }}
                         type="button"
                         className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
@@ -152,7 +163,7 @@ export default function TaskCustomizer({
                         Edit
                       </button>
                       <button
-                        onClick={() => handleDeleteTask(task.id)}
+                        onClick={() => void handleDeleteTask(task.id)}
                         type="button"
                         className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
                       >
@@ -164,7 +175,7 @@ export default function TaskCustomizer({
                   {/* Move Buttons */}
                   {index > 0 && (
                     <button
-                      onClick={() => handleMoveTask(index, "up")}
+                      onClick={() => void handleMoveTask(index, "up")}
                       type="button"
                       className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700"
                     >
@@ -173,7 +184,7 @@ export default function TaskCustomizer({
                   )}
                   {index < tasks.length - 1 && (
                     <button
-                      onClick={() => handleMoveTask(index, "down")}
+                      onClick={() => void handleMoveTask(index, "down")}
                       type="button"
                       className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700"
                     >
@@ -187,7 +198,7 @@ export default function TaskCustomizer({
 
           {/* Add Task Button */}
           <button
-            onClick={handleAddTask}
+            onClick={() => void handleAddTask()}
             type="button"
             className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 mb-6"
           >
@@ -205,7 +216,7 @@ export default function TaskCustomizer({
             Cancel
           </button>
           <button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             type="button"
             className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >

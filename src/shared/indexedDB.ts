@@ -111,6 +111,18 @@ async function saveSession(session: PracticeSession): Promise<void> {
 	});
 }
 
+async function clearSessions(): Promise<void> {
+	const database = await _getDB();
+	const tx = database.transaction(SESSIONS_STORE, "readwrite");
+	const store = tx.objectStore(SESSIONS_STORE);
+
+	return new Promise((resolve, reject) => {
+		const request = store.clear();
+		request.onerror = () => reject(request.error);
+		request.onsuccess = () => resolve();
+	});
+}
+
 async function loadSession(date: string): Promise<PracticeSession | null> {
 	const database = await _getDB();
 	const tx = database.transaction(SESSIONS_STORE, "readonly");
@@ -225,8 +237,16 @@ export async function resetToDefaults(): Promise<PracticeState> {
 		getLosAngelesDateString(),
 	);
 
+	await clearSessions();
 	await saveTemplate(DEFAULT_TEMPLATE);
 	await saveSession(session);
 
 	return { template: [...DEFAULT_TEMPLATE], session };
+}
+
+export function __resetIndexedDbConnectionForTests(): void {
+	if (db) {
+		db.close();
+	}
+	db = null;
 }

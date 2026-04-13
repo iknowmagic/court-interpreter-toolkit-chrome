@@ -129,13 +129,16 @@ export function reconcileSessionWithTemplate(
 			};
 		}
 
+		const durationChanged = existing.duration !== templateTask.duration;
 		return {
 			...templateTask,
 			note: existing.note ?? "",
 			completedAt: existing.completedAt ?? null,
-			remainingSeconds: existing.completedAt
-				? 0
-				: Math.max(0, existing.remainingSeconds),
+			remainingSeconds: durationChanged
+				? templateTask.duration * 60
+				: existing.completedAt
+					? 0
+					: Math.max(0, existing.remainingSeconds),
 		};
 	});
 

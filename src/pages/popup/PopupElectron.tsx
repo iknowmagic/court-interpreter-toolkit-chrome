@@ -50,6 +50,9 @@ const C = {
   accentBg: "#fef3e8",
   done: "#2e7d52",
   dark: "#1a1714",
+  disabledBg: "#e3e3e3",
+  disabledBorder: "#9d9d9d",
+  disabledText: "#676767",
 } as const;
 
 function findTask(
@@ -438,6 +441,11 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   }, [active]);
   const todayDateKey = getLosAngelesDateString();
   const isViewingToday = session.date === todayDateKey;
+  useEffect(() => {
+    if (!isViewingToday && modal) {
+      setModal(null);
+    }
+  }, [isViewingToday, modal]);
   const sessionDateSet = useMemo(() => new Set(sessionDates), [sessionDates]);
   const completedSessionDateSet = useMemo(() => {
     const keys = new Set(completedSessionDates);
@@ -504,46 +512,71 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     });
   };
 
-  const addTask = () => setModal({ mode: "add", name: "", duration: "5" });
+  const addTask = () => {
+    if (!isViewingToday) return;
+    setModal({ mode: "add", name: "", duration: "5" });
+  };
   const editTask = () =>
     selected &&
+    isViewingToday &&
     setModal({
       mode: "edit",
       taskId: selected.id,
       name: selected.name,
       duration: String(selected.duration),
     });
+  const stopTimerForMutation = async () => {
+    try {
+      const paused = await rpc.pauseSession();
+      if (paused) {
+        setTemplate(paused.template);
+        setSession(paused.session);
+      }
+    } catch (error) {
+      console.error("Failed to pause session before mutation", error);
+    }
+    setRunning(false);
+  };
   const deleteTask = () => {
     if (!selected || template.length <= 1) return;
     if (!window.confirm(`Delete "${selected.name}" from the template?`)) return;
-    syncTemplate(template.filter((task) => task.id !== selected.id));
+    void (async () => {
+      await stopTimerForMutation();
+      syncTemplate(template.filter((task) => task.id !== selected.id));
+    })();
   };
   const moveTask = (direction: -1 | 1) => {
     if (!selected) return;
     const index = template.findIndex((task) => task.id === selected.id);
     const target = index + direction;
     if (target < 0 || target >= template.length) return;
-    const next = [...template];
-    [next[index], next[target]] = [next[target], next[index]];
-    syncTemplate(next);
+    void (async () => {
+      await stopTimerForMutation();
+      const next = [...template];
+      [next[index], next[target]] = [next[target], next[index]];
+      syncTemplate(next);
+    })();
   };
 
   const confirmModal = () => {
     if (!modal) return;
-    const name = modal.name.trim() || "Task";
-    const duration = Math.max(1, Number.parseInt(modal.duration, 10) || 5);
-    if (modal.mode === "add") {
-      const task = { id: createTaskId("practice-task"), name, duration };
-      syncTemplate([...template, task]);
-      setSelectedTaskId(task.id);
-    } else {
-      syncTemplate(
-        template.map((task) =>
-          task.id === modal.taskId ? { ...task, name, duration } : task,
-        ),
-      );
-    }
-    setModal(null);
+    void (async () => {
+      await stopTimerForMutation();
+      const name = modal.name.trim() || "Task";
+      const duration = Math.max(1, Number.parseInt(modal.duration, 10) || 5);
+      if (modal.mode === "add") {
+        const task = { id: createTaskId("practice-task"), name, duration };
+        syncTemplate([...template, task]);
+        setSelectedTaskId(task.id);
+      } else {
+        syncTemplate(
+          template.map((task) =>
+            task.id === modal.taskId ? { ...task, name, duration } : task,
+          ),
+        );
+      }
+      setModal(null);
+    })();
   };
 
   const play = async () => {
@@ -604,7 +637,11 @@ export default function CourtInterpreterApp(): React.JSX.Element {
   };
 
   const resetDefaults = async () => {
-    if (!window.confirm("Reset task template and today session to defaults?"))
+    if (
+      !window.confirm(
+        "Are you sure you want to reset the list? All progress data across all days will be deleted. This action cannot be undone.",
+      )
+    )
       return;
     await rpc.pauseSession().catch((error) => {
       console.error("Failed to pause session before reset", error);
@@ -620,11 +657,7 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         1,
       ),
     );
-    setSessionDates((previous) =>
-      previous.includes(next.session.date)
-        ? previous
-        : [...previous, next.session.date],
-    );
+    setSessionDates([next.session.date]);
     setSelectedTaskId(next.session.currentTaskId ?? next.template[0]?.id ?? "");
     resetNoteSaveIndicator();
   };
@@ -683,6 +716,10 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     );
   };
 
+  const goToToday = () => {
+    void loadDate(todayDateKey);
+  };
+
   if (!ready)
     return (
       <div className="practice-loading">
@@ -693,7 +730,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
     );
 
   return (
-    <div className="practice-app practice-app--popup">
+    <div
+      className={`practice-app practice-app--popup${isViewingToday ? "" : " practice-app--history"}`}
+    >
       <style>{`
         .practice-app{min-height:100%;display:flex;flex-direction:column;background:${C.bg};color:${C.text}}
         .practice-shell{width:min(1120px,calc(100% - 24px));margin:0 auto;display:flex;flex-direction:column;flex:1}
@@ -708,6 +747,9 @@ export default function CourtInterpreterApp(): React.JSX.Element {
         .practice-btn-strong:hover:not(:disabled){background:${C.accentDk}!important;border-color:${C.accentDk}!important;color:#fff!important}
         .practice-btn-danger{background:#8f2f1f!important;border-color:#8f2f1f!important;color:#fff!important}
         .practice-btn-danger:hover:not(:disabled){background:#76271a!important;border-color:#76271a!important;color:#fff!important}
+        .practice-btn:disabled,.practice-input:disabled,.practice-textarea:disabled{cursor:not-allowed}
+        .practice-app--history .practice-btn:disabled,.practice-app--history .practice-input:disabled,.practice-app--history .practice-textarea:disabled{background:${C.disabledBg}!important;border-color:${C.disabledBorder}!important;color:${C.disabledText}!important;box-shadow:none!important}
+        .practice-app--history .practice-btn:disabled:hover{background:${C.disabledBg}!important;border-color:${C.disabledBorder}!important;color:${C.disabledText}!important}
         .practice-current-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
         .practice-input:focus,.practice-textarea:focus{border-color:${C.accent}!important;outline:none}
         .practice-calendar-popover{position:fixed;z-index:250;width:280px;max-width:calc(100vw - 16px);background:${C.surface};border:1px solid ${C.border};border-radius:12px;box-shadow:0 18px 42px rgba(26,23,20,0.22);padding:10px}
@@ -1083,6 +1125,16 @@ export default function CourtInterpreterApp(): React.JSX.Element {
                       </button>
                     );
                   })}
+                </div>
+                <div style={{ marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    className="practice-btn"
+                    style={{ width: "100%" }}
+                    onClick={goToToday}
+                  >
+                    Today
+                  </button>
                 </div>
               </div>
             </div>,
