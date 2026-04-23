@@ -52,7 +52,7 @@
 		"nodemon": "^3.1.10",
 		"tailwindcss": "^4.1.16",
 		"ts-node": "^10.9.2",
-		"typescript": "^5.8.3",
+		"typescript": "^6.0.2",
 		"vite": "^6.3.5",
 		"vite-tsconfig-paths": "^5.1.4",
 		"vitest": "^4.1.4"
