@@ -1,3 +1,3 @@
-import PopupElectron from "@pages/popup/PopupElectron";
+import SessionPopup from "@pages/popup/SessionPopup";
 
-export default PopupElectron;
+export default SessionPopup;

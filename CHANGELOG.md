@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Changed
+- Renamed the popup surface component from `PopupElectron` to `SessionPopup`, including updated popup exports and popup test naming.
+- Updated the popup task list to use a fixed internal scroll region (`height: 270px`) instead of max-height-based behavior.
+- Added a dedicated left-column controls wrapper (`practice-side-controls`) so task/action controls can be anchored to the bottom of the popup column.
+- Added themed task-list scrollbar styling with `scrollbar-color: #e9d0a8 #fdfaf5` and matching WebKit thumb/track rules.
+
+### Fixed
+- Removed the stretched empty area below the task list by aligning list-card sizing with fixed-height list scrolling and bottom-anchored controls.
+
 ## [1.5.0] - 2026-04-12
 
 ### Added
