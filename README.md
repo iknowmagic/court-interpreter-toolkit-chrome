@@ -133,4 +133,5 @@ Produces `tmp/court-interpreter-v<version>.zip` from a fresh `dist_chrome/` buil
 ## Links
 
 - Product: https://court-interpreter-toolkit.cod3naut.com/
+- Chrome Web Store: https://chromewebstore.google.com/detail/court-interpreter-toolkit/ghbnejickfddbmfjkgofklghbmaambhb
 - Source: https://github.com/iknowmagic/court-interpreter-toolkit-chrome
