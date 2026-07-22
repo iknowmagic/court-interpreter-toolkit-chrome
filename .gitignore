@@ -383,7 +383,7 @@ $RECYCLE.BIN/
 # build
 /dist
 /dist_chrome
-/dist_firefox
+/build
 
 # etc
 .idea

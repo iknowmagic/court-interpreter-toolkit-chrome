@@ -1,4 +1,5 @@
 {
+	"name": "Court Interpreter Toolkit (Development)",
 	"action": {
 		"default_icon": {
 			"32": "dev-icon-32.png",
@@ -9,11 +10,5 @@
 	"icons": {
 		"32": "dev-icon-32.png",
 		"128": "dev-icon-128.png"
-	},
-	"web_accessible_resources": [
-		{
-			"resources": ["contentStyle.css", "dev-icon-32.png", "dev-icon-128.png"],
-			"matches": []
-		}
-	]
+	}
 }

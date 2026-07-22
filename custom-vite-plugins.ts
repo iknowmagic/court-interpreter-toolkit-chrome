@@ -1,55 +1,38 @@
-import fs from "fs";
-import { resolve } from "path";
-import type { PluginOption } from "vite";
+import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
+import type { Plugin, ResolvedConfig } from "vite";
 
-// plugin to remove dev icons from prod build
-export function stripDevIcons(isDev: boolean) {
-	if (isDev) return null;
+const DEV_ICON_FILENAMES = ["dev-icon-32.png", "dev-icon-128.png"];
+
+async function removeIfExists(path: string): Promise<void> {
+	try {
+		await rm(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+}
+
+/**
+ * Vite's publicDir copy ships every file under `public/`, including the
+ * development-only icons, into every build. Production builds must not
+ * expose them, so this plugin removes them from the output directory once
+ * the production bundle is written. A no-op in development: the icons stay
+ * where publicDir already put them.
+ */
+export function stripDevIcons(isDevelopment: boolean): Plugin | null {
+	if (isDevelopment) return null;
+
+	let outDir = "";
 
 	return {
 		name: "strip-dev-icons",
-		resolveId(source: string) {
-			return source === "virtual-module" ? source : null;
+		configResolved(config: ResolvedConfig) {
+			outDir = config.build.outDir;
 		},
-		renderStart() {},
-	};
-}
-
-// plugin to support i18n
-export function crxI18n(options: {
-	localize: boolean;
-	src: string;
-}): PluginOption {
-	if (!options.localize) return null;
-
-	const getJsonFiles = (dir: string): Array<string> => {
-		const files = fs.readdirSync(dir, { recursive: true }) as string[];
-		return files.filter((file) => !!file && file.endsWith(".json"));
-	};
-	const entry = resolve(__dirname, options.src);
-	const localeFiles = getJsonFiles(entry);
-	const files = localeFiles.map((file) => {
-		return {
-			id: "",
-			fileName: file,
-			source: fs.readFileSync(resolve(entry, file)),
-		};
-	});
-	return {
-		name: "crx-i18n",
-		enforce: "pre",
-		buildStart: {
-			order: "post",
-			handler() {
-				files.forEach((file) => {
-					const refId = this.emitFile({
-						type: "asset",
-						source: file.source,
-						fileName: "_locales/" + file.fileName,
-					});
-					file.id = refId;
-				});
-			},
+		async closeBundle() {
+			await Promise.all(
+				DEV_ICON_FILENAMES.map((filename) => removeIfExists(resolve(outDir, filename))),
+			);
 		},
 	};
 }
