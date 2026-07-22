@@ -537,6 +537,7 @@ async function performInitialization(): Promise<void> {
 	await db.initDB();
 	sessionState.state = await db.loadState();
 	await materializeRunningTimer(Date.now());
+	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 }
 
 /**
@@ -788,7 +789,14 @@ export async function handleActionContextMenuClick(
 	}
 }
 
-export function getRunningState(): { isRunning: boolean; isPaused: boolean } {
+export async function getRunningState(): Promise<{
+	isRunning: boolean;
+	isPaused: boolean;
+}> {
+	await ensureInitialized();
+	if (sessionState.isRunning) {
+		await materializeRunningTimer(Date.now());
+	}
 	return {
 		isRunning: sessionState.isRunning,
 		isPaused: sessionState.isPaused,

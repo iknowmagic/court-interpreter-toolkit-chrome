@@ -80,6 +80,56 @@ describe("sessionManager", () => {
     expect(chromeMock.actionState).toEqual(beforeAction);
   });
 
+  it("publishes toolbar title, badge, and context menu on startup with no running timer runtime", async () => {
+    const sm = await freshSessionManager();
+    await sm.ensureInitialized();
+
+    expect(chromeMock.actionState.title).toMatch(/^Stopped:/);
+    expect(chromeMock.actionState.badgeText).not.toBe("DONE");
+
+    const menuEntries = Array.from(chromeMock.contextMenuItems.values());
+    const currentEntry = menuEntries.find((entry) =>
+      String(entry.title).startsWith("Current Task:"),
+    );
+    expect(currentEntry).toBeDefined();
+
+    const playEntry = chromeMock.contextMenuItems.get(sm.CONTEXT_MENU_PLAY);
+    const stopEntry = chromeMock.contextMenuItems.get(sm.CONTEXT_MENU_STOP);
+    const doneEntry = chromeMock.contextMenuItems.get(sm.CONTEXT_MENU_DONE);
+    expect(playEntry?.enabled).toBe(true);
+    expect(stopEntry?.enabled).toBe(false);
+    expect(doneEntry?.enabled).toBe(true);
+  });
+
+  it("publishes a completed, stopped, unpaused state on startup after the final task's deadline has already passed", async () => {
+    let sm = await freshSessionManager();
+    await sm.newDay([{ id: "only", name: "Only Task", duration: 1 }]);
+    await sm.startSession();
+
+    vi.setSystemTime(Date.now() + 61_000); // past the final task's deadline
+
+    sm = await freshSessionManager();
+    await sm.ensureInitialized();
+
+    expect(chromeMock.actionState.badgeText).toBe("DONE");
+    expect(chromeMock.actionState.title).toMatch(/^Complete:/);
+    expect((await sm.getRunningState())).toEqual({ isRunning: false, isPaused: false });
+
+    const playEntry = chromeMock.contextMenuItems.get(sm.CONTEXT_MENU_PLAY);
+    const stopEntry = chromeMock.contextMenuItems.get(sm.CONTEXT_MENU_STOP);
+    const doneEntry = chromeMock.contextMenuItems.get(sm.CONTEXT_MENU_DONE);
+    expect(playEntry?.enabled).toBe(false);
+    expect(stopEntry?.enabled).toBe(false);
+    expect(doneEntry?.enabled).toBe(false);
+
+    const runtime = chromeMock.storageData[RUNTIME_STORAGE_KEY] as {
+      isRunning: boolean;
+      isPaused: boolean;
+    };
+    expect(runtime.isRunning).toBe(false);
+    expect(runtime.isPaused).toBe(false);
+  });
+
   it("starting a task persists a valid deadline runtime record", async () => {
     const sm = await freshSessionManager();
     const state = await sm.startSession();
@@ -141,7 +191,7 @@ describe("sessionManager", () => {
     expect(firstTask.remainingSeconds).toBe(0);
     expect(materialized!.session.currentTaskId).not.toBe(firstTaskId);
     expect(materialized!.session.done).toBe(false);
-    expect(sm.getRunningState().isRunning).toBe(false);
+    expect((await sm.getRunningState()).isRunning).toBe(false);
 
     const secondTaskId = materialized!.session.currentTaskId!;
     const again = await sm.materializeRunningTimer(now);
@@ -163,6 +213,50 @@ describe("sessionManager", () => {
     expect(materialized!.session.tasks[0].completedAt).not.toBeNull();
   });
 
+  it("getRunningState reconciles an expired non-final deadline before returning status", async () => {
+    const sm = await freshSessionManager();
+    const started = await sm.startSession();
+    const firstTaskId = started!.session.currentTaskId!;
+
+    // Move the clock past the deadline without letting the ticker/alarm run.
+    vi.setSystemTime(Date.now() + 301_000);
+
+    const status = await sm.getRunningState();
+    expect(status).toEqual({ isRunning: false, isPaused: true });
+
+    const state = await sm.getSessionState();
+    const firstTask = state!.session.tasks.find((t) => t.id === firstTaskId)!;
+    expect(firstTask.completedAt).not.toBeNull();
+
+    const runtime = chromeMock.storageData[RUNTIME_STORAGE_KEY] as {
+      isRunning: boolean;
+      isPaused: boolean;
+    };
+    expect(runtime.isRunning).toBe(false);
+    expect(runtime.isPaused).toBe(true);
+  });
+
+  it("getRunningState reconciles an expired final-task deadline as stopped and unpaused", async () => {
+    const sm = await freshSessionManager();
+    await sm.newDay([{ id: "only", name: "Only Task", duration: 1 }]);
+    await sm.startSession();
+
+    vi.setSystemTime(Date.now() + 61_000);
+
+    const status = await sm.getRunningState();
+    expect(status).toEqual({ isRunning: false, isPaused: false });
+
+    const state = await sm.getSessionState();
+    expect(state!.session.done).toBe(true);
+
+    const runtime = chromeMock.storageData[RUNTIME_STORAGE_KEY] as {
+      isRunning: boolean;
+      isPaused: boolean;
+    };
+    expect(runtime.isRunning).toBe(false);
+    expect(runtime.isPaused).toBe(false);
+  });
+
   it("pausing after a simulated suspension persists correct remaining time and clears the running runtime", async () => {
     const sm = await freshSessionManager();
     await sm.startSession();
@@ -180,7 +274,7 @@ describe("sessionManager", () => {
     };
     expect(runtime.isRunning).toBe(false);
     expect(runtime.endsAtMs).toBeNull();
-    expect(sm.getRunningState().isRunning).toBe(false);
+    expect((await sm.getRunningState()).isRunning).toBe(false);
   });
 
   it("pausing after the final task's deadline reports stopped and not paused", async () => {
@@ -192,7 +286,7 @@ describe("sessionManager", () => {
 
     const paused = await sm.pauseSession();
     expect(paused!.session.done).toBe(true);
-    expect(sm.getRunningState()).toEqual({ isRunning: false, isPaused: false });
+    expect(await sm.getRunningState()).toEqual({ isRunning: false, isPaused: false });
 
     const runtime = chromeMock.storageData[RUNTIME_STORAGE_KEY] as {
       isRunning: boolean;
@@ -209,7 +303,7 @@ describe("sessionManager", () => {
 
     const result = await sm.completeCurrentTaskAndAdvanceNoStart();
     expect(result!.session.done).toBe(true);
-    expect(sm.getRunningState()).toEqual({ isRunning: false, isPaused: false });
+    expect(await sm.getRunningState()).toEqual({ isRunning: false, isPaused: false });
 
     const runtime = chromeMock.storageData[RUNTIME_STORAGE_KEY] as {
       isRunning: boolean;
@@ -230,7 +324,7 @@ describe("sessionManager", () => {
     const result = await sm.completeCurrentTaskAndAdvanceNoStart();
     expect(result!.session.done).toBe(false);
     expect(result!.session.currentTaskId).toBe("second");
-    expect(sm.getRunningState()).toEqual({ isRunning: false, isPaused: true });
+    expect(await sm.getRunningState()).toEqual({ isRunning: false, isPaused: true });
 
     const runtime = chromeMock.storageData[RUNTIME_STORAGE_KEY] as {
       isRunning: boolean;
@@ -261,14 +355,14 @@ describe("sessionManager", () => {
     const task = state!.session.tasks.find((t) => t.id === taskId)!;
     expect(task.remainingSeconds).toBe(originalRemaining);
     expect(task.completedAt).toBeNull();
-    expect(sm.getRunningState().isRunning).toBe(false);
+    expect((await sm.getRunningState()).isRunning).toBe(false);
   });
 
   it("is safe when a request arrives immediately after a fresh module load", async () => {
     const sm = await freshSessionManager();
     const [state, running] = await Promise.all([
       sm.getSessionState(),
-      Promise.resolve(sm.getRunningState()),
+      sm.getRunningState(),
     ]);
     expect(state).not.toBeNull();
     expect(running).toEqual({ isRunning: false, isPaused: false });
@@ -278,10 +372,10 @@ describe("sessionManager", () => {
     const sm = await freshSessionManager();
 
     await sm.handleActionContextMenuClick(sm.CONTEXT_MENU_PLAY);
-    expect(sm.getRunningState().isRunning).toBe(true);
+    expect((await sm.getRunningState()).isRunning).toBe(true);
 
     await sm.handleActionContextMenuClick(sm.CONTEXT_MENU_STOP);
-    expect(sm.getRunningState().isRunning).toBe(false);
+    expect((await sm.getRunningState()).isRunning).toBe(false);
 
     const before = await sm.getSessionState();
     const firstTaskId = before!.session.currentTaskId;
@@ -293,7 +387,7 @@ describe("sessionManager", () => {
       after!.session.tasks.find((t) => t.id === firstTaskId)!.completedAt,
     ).not.toBeNull();
     expect(after!.session.currentTaskId).not.toBe(firstTaskId);
-    expect(sm.getRunningState().isRunning).toBe(false);
+    expect((await sm.getRunningState()).isRunning).toBe(false);
   });
 
   it("coalesces concurrent materialization calls into a single authoritative transition", async () => {
@@ -307,18 +401,21 @@ describe("sessionManager", () => {
     const saveStateSpy = vi.spyOn(db, "saveState");
     saveStateSpy.mockClear();
 
-    const [first, second, third] = await Promise.all([
+    const [first, second, third, status] = await Promise.all([
       sm.materializeRunningTimer(now),
       sm.materializeRunningTimer(now),
       sm.materializeRunningTimer(now),
+      sm.getRunningState(),
     ]);
 
     // Every concurrent caller receives the exact same authoritative result.
     expect(first).toBe(second);
     expect(second).toBe(third);
-    // Only one completion/save transition occurred, not three.
+    // Only one completion/save transition occurred, not three or four:
+    // getRunningState's own materializeRunningTimer call shared the in-flight result.
     expect(saveStateSpy).toHaveBeenCalledTimes(1);
     expect(first!.session.tasks.find((t) => t.completedAt !== null)).toBeTruthy();
+    expect(status).toEqual({ isRunning: false, isPaused: true });
 
     // A later materialization (after the first settles) still runs normally.
     saveStateSpy.mockClear();
