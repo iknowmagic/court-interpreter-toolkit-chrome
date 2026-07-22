@@ -1,38 +1,40 @@
 import {
-	formatLosAngelesTimestamp,
+	getLosAngelesDateString,
 	type PracticeState,
+	type PracticeSession,
+	type PracticeSessionSummary,
 	type PracticeTemplateTask,
 } from "../shared/practice";
 import * as db from "../shared/indexedDB";
+import * as timerRuntime from "./timerRuntime";
+import { completeCurrentTaskAndAdvance } from "./sessionTransitions";
 
 export interface SessionManagerState {
 	state: PracticeState | null;
 	isRunning: boolean;
 	isPaused: boolean;
-	pausedAtMs: number;
 }
 
-let sessionState: SessionManagerState = {
+const sessionState: SessionManagerState = {
 	state: null,
 	isRunning: false,
 	isPaused: false,
-	pausedAtMs: 0,
 };
-let lastToolbarStatusUpdateMs = 0;
+
 const BACKGROUND_TICK_INTERVAL_MS = 1000;
 const BACKGROUND_TICK_ALARM = "practice-session-tick";
 const CONTEXT_MENU_CURRENT = "practice-current-task";
-const CONTEXT_MENU_PLAY = "practice-play";
-const CONTEXT_MENU_STOP = "practice-stop";
-const CONTEXT_MENU_DONE = "practice-done";
+export const CONTEXT_MENU_PLAY = "practice-play";
+export const CONTEXT_MENU_STOP = "practice-stop";
+export const CONTEXT_MENU_DONE = "practice-done";
 const SETTINGS_STORAGE_KEY = "session-manager-settings";
 const OFFSCREEN_ALARM_DOCUMENT = "alarm-player.html";
 const OFFSCREEN_ALARM_MESSAGE_TYPE = "PLAY_COMPLETION_ALARM";
-let tickIntervalId: number | null = null;
-let tickInFlight = false;
-let lastTickAtMs = Date.now();
+
+let tickIntervalId: ReturnType<typeof setInterval> | null = null;
 let contextMenuInitialized = false;
 let settingsLoaded = false;
+let initPromise: Promise<void> | null = null;
 
 interface SessionManagerSettings {
 	completionAlarmEnabled: boolean;
@@ -52,19 +54,12 @@ type OffscreenApi = {
 	}) => Promise<void>;
 };
 
-function elapsedSecondsSinceLastTick(nowMs = Date.now()): number {
-	const elapsed = Math.floor((nowMs - lastTickAtMs) / 1000);
-	if (elapsed <= 0) return 0;
-	lastTickAtMs += elapsed * 1000;
-	return elapsed;
-}
-
 function ensureTickerRunning(): void {
 	if (tickIntervalId !== null) return;
-	lastTickAtMs = Date.now();
 	tickIntervalId = globalThis.setInterval(() => {
-		const elapsedSeconds = elapsedSecondsSinceLastTick();
-		void runBackgroundTick(elapsedSeconds);
+		void materializeRunningTimer(Date.now()).catch((error) => {
+			console.error("Failed to materialize running timer", error);
+		});
 	}, BACKGROUND_TICK_INTERVAL_MS);
 	if (chrome.alarms) {
 		void chrome.alarms.create(BACKGROUND_TICK_ALARM, { periodInMinutes: 0.5 });
@@ -78,18 +73,6 @@ function stopTicker(): void {
 	}
 	if (chrome.alarms) {
 		void chrome.alarms.clear(BACKGROUND_TICK_ALARM);
-	}
-}
-
-async function runBackgroundTick(seconds: number): Promise<void> {
-	if (seconds <= 0 || !sessionState.isRunning || tickInFlight) return;
-	tickInFlight = true;
-	try {
-		await decrementTimer(seconds);
-	} catch (error) {
-		console.error("Failed to run background timer tick", error);
-	} finally {
-		tickInFlight = false;
 	}
 }
 
@@ -109,27 +92,15 @@ function createMenuItem(
 	});
 }
 
-function updateMenuItem(
+async function updateMenuItem(
 	id: string,
-	updateProperties: chrome.contextMenus.UpdateProperties,
+	updateProperties: Omit<chrome.contextMenus.CreateProperties, "id">,
 ): Promise<void> {
-	return new Promise((resolve, reject) => {
-		chrome.contextMenus.update(id, updateProperties, () => {
-			if (chrome.runtime.lastError) {
-				reject(new Error(chrome.runtime.lastError.message));
-				return;
-			}
-			resolve();
-		});
-	});
+	await chrome.contextMenus.update(id, updateProperties);
 }
 
-function removeAllMenuItems(): Promise<void> {
-	return new Promise((resolve) => {
-		chrome.contextMenus.removeAll(() => {
-			resolve();
-		});
-	});
+async function removeAllMenuItems(): Promise<void> {
+	await chrome.contextMenus.removeAll();
 }
 
 function parseStoredSettings(raw: unknown): SessionManagerSettings {
@@ -375,41 +346,238 @@ async function refreshToolbarAction(
 	await refreshActionContextMenu(state, isRunning);
 }
 
-export async function initializeSessionManager(): Promise<void> {
-	await ensureSettingsLoaded();
-	// Initialize IndexedDB and load current state
-	await db.initDB();
-	sessionState.state = await db.loadState();
-	if (chrome.alarms) {
-		const existingAlarm = await chrome.alarms.get(BACKGROUND_TICK_ALARM);
-		if (existingAlarm) {
-			sessionState.isRunning = true;
-			sessionState.isPaused = false;
-			ensureTickerRunning();
+/**
+ * Stops the runtime record without touching persisted session progress.
+ * Used whenever a persisted deadline points at something that no longer
+ * makes sense (deleted task, completed task, wrong day) so a corrupt or
+ * stale runtime record can never overwrite real progress.
+ */
+async function stopRuntimeSafely(state: PracticeState | null): Promise<void> {
+	stopTicker();
+	sessionState.isRunning = false;
+	sessionState.isPaused = false;
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.stoppedRuntime(
+			state?.session.date ?? null,
+			state?.session.currentTaskId ?? null,
+			false,
+		),
+	);
+	await refreshToolbarAction(state, false);
+}
+
+async function resolvePriorDayRollover(
+	runtime: timerRuntime.PersistedTimerRuntime,
+	nowMs: number,
+): Promise<void> {
+	const priorDate = runtime.sessionDate as string;
+	const priorState = await db.loadStateByDate(priorDate);
+	const currentTask = priorState.session.tasks.find(
+		(task) => task.id === runtime.taskId,
+	);
+
+	if (
+		currentTask &&
+		currentTask.completedAt === null &&
+		!priorState.session.done &&
+		runtime.endsAtMs !== null
+	) {
+		const remaining = timerRuntime.remainingSecondsFromDeadline(
+			runtime.endsAtMs,
+			nowMs,
+		);
+
+		if (remaining > 0) {
+			const updatedSession: PracticeSession = {
+				...priorState.session,
+				tasks: priorState.session.tasks.map((task) =>
+					task.id === currentTask.id
+						? { ...task, remainingSeconds: remaining }
+						: task,
+				),
+			};
+			await db.saveState({ ...priorState, session: updatedSession });
+		} else {
+			const { session, completedTaskId } = completeCurrentTaskAndAdvance(
+				priorState.session,
+			);
+			await db.saveState({ ...priorState, session });
+			if (completedTaskId) {
+				await maybePlayCompletionAlarm();
+			}
 		}
 	}
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+
+	stopTicker();
+	sessionState.isRunning = false;
+	sessionState.isPaused = false;
+	await timerRuntime.saveTimerRuntime(timerRuntime.stoppedRuntime(null, null, false));
+
+	sessionState.state = await db.loadState();
+	await refreshToolbarAction(sessionState.state, false);
+}
+
+/**
+ * Recomputes the active practice state from the persisted deadline. Safe to
+ * call repeatedly (ticker, alarm, queries, restart) at the same or later
+ * timestamp: recomputation is idempotent because remaining time is always
+ * derived fresh from `endsAtMs`, never accumulated from an in-memory tick.
+ */
+async function materializeRunningTimerInternal(
+	nowMs: number,
+): Promise<PracticeState | null> {
+	const runtime = await timerRuntime.loadTimerRuntime();
+
+	if (!runtime || !runtime.isRunning) {
+		sessionState.isRunning = false;
+		sessionState.isPaused = runtime?.isPaused ?? sessionState.isPaused;
+		stopTicker();
+		if (!sessionState.state) {
+			sessionState.state = await db.loadState();
+		}
+		return sessionState.state;
+	}
+
+	const currentLaDate = getLosAngelesDateString(new Date(nowMs));
+
+	if (runtime.sessionDate && runtime.sessionDate !== currentLaDate) {
+		await resolvePriorDayRollover(runtime, nowMs);
+		return sessionState.state;
+	}
+
+	const targetDate = runtime.sessionDate ?? currentLaDate;
+	let state =
+		sessionState.state && sessionState.state.session.date === targetDate
+			? sessionState.state
+			: await db.loadState();
+
+	const currentTask = state.session.tasks.find(
+		(task) => task.id === runtime.taskId,
+	);
+
+	if (
+		!currentTask ||
+		currentTask.completedAt !== null ||
+		state.session.done ||
+		runtime.endsAtMs === null
+	) {
+		sessionState.state = state;
+		await stopRuntimeSafely(state);
+		return sessionState.state;
+	}
+
+	const remaining = timerRuntime.remainingSecondsFromDeadline(
+		runtime.endsAtMs,
+		nowMs,
+	);
+
+	if (remaining > 0) {
+		const updatedSession: PracticeSession = {
+			...state.session,
+			tasks: state.session.tasks.map((task) =>
+				task.id === currentTask.id
+					? { ...task, remainingSeconds: remaining }
+					: task,
+			),
+		};
+		state = await db.saveState({ ...state, session: updatedSession });
+		sessionState.state = state;
+		sessionState.isRunning = true;
+		sessionState.isPaused = false;
+		ensureTickerRunning();
+		await refreshToolbarAction(sessionState.state, true);
+		return sessionState.state;
+	}
+
+	const { session: advancedSession, completedTaskId } =
+		completeCurrentTaskAndAdvance(state.session);
+	state = await db.saveState({ ...state, session: advancedSession });
+	sessionState.state = state;
+	sessionState.isRunning = false;
+	sessionState.isPaused = !state.session.done;
+	stopTicker();
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.stoppedRuntime(
+			state.session.date,
+			state.session.currentTaskId,
+			sessionState.isPaused,
+		),
+	);
+	await refreshToolbarAction(sessionState.state, false);
+	if (completedTaskId) {
+		await maybePlayCompletionAlarm();
+	}
+	return sessionState.state;
+}
+
+let materializationInFlight: Promise<PracticeState | null> | null = null;
+
+/**
+ * Single-flight wrapper: interval ticks, the Chrome alarm, initialization,
+ * state reads, pause, and other runtime commands can all call this at
+ * nearly the same moment. Only one `materializeRunningTimerInternal` may run
+ * at a time; every caller that arrives while one is in flight gets that same
+ * authoritative result instead of racing a second completion/save/alarm
+ * transition. The slot is cleared in `finally` so a rejected materialization
+ * can be retried by the next caller instead of being permanently stuck.
+ */
+export function materializeRunningTimer(
+	nowMs = Date.now(),
+): Promise<PracticeState | null> {
+	if (!materializationInFlight) {
+		materializationInFlight = materializeRunningTimerInternal(nowMs).finally(() => {
+			materializationInFlight = null;
+		});
+	}
+	return materializationInFlight;
+}
+
+async function performInitialization(): Promise<void> {
+	await ensureSettingsLoaded();
+	await db.initDB();
+	sessionState.state = await db.loadState();
+	await materializeRunningTimer(Date.now());
+}
+
+/**
+ * Ensures background initialization has run exactly once, and lets every
+ * caller (messages, alarms, context-menu clicks) await the same promise so
+ * an early caller can never race an incomplete startup.
+ */
+export function ensureInitialized(): Promise<void> {
+	if (!initPromise) {
+		initPromise = performInitialization().catch((error) => {
+			initPromise = null;
+			throw error;
+		});
+	}
+	return initPromise;
 }
 
 export async function getSessionState(): Promise<PracticeState | null> {
+	await ensureInitialized();
+	if (sessionState.isRunning) {
+		await materializeRunningTimer(Date.now());
+	}
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();
 	}
 	return sessionState.state;
 }
 
-export async function loadStateByDate(date: string): Promise<PracticeState> {
-	const state = await db.loadStateByDate(date);
-	sessionState.state = state;
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-	return state;
+/** Read-only: never mutates active background state, runtime, or toolbar. */
+export async function readStateByDate(date: string): Promise<PracticeState> {
+	await ensureInitialized();
+	return db.loadStateByDate(date);
 }
 
-export async function listSessionDates(): Promise<string[]> {
-	return db.listSessionDates();
+export async function listSessionSummaries(): Promise<PracticeSessionSummary[]> {
+	await ensureInitialized();
+	return db.listSessionSummaries();
 }
 
 export async function startSession(): Promise<PracticeState | null> {
+	await ensureInitialized();
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();
 	}
@@ -428,7 +596,10 @@ export async function startSession(): Promise<PracticeState | null> {
 		sessionState.isRunning = false;
 		sessionState.isPaused = false;
 		stopTicker();
-		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+		await timerRuntime.saveTimerRuntime(
+			timerRuntime.stoppedRuntime(sessionState.state.session.date, null, false),
+		);
+		await refreshToolbarAction(sessionState.state, false);
 		return sessionState.state;
 	}
 
@@ -441,120 +612,47 @@ export async function startSession(): Promise<PracticeState | null> {
 	sessionState.state.session.done = false;
 	sessionState.state = await db.saveState(sessionState.state);
 
+	const savedTask = sessionState.state.session.tasks.find(
+		(task) => task.id === currentTask.id,
+	);
+	const remainingSeconds = Math.max(1, savedTask?.remainingSeconds ?? currentTask.duration * 60);
+	const endsAtMs = Date.now() + remainingSeconds * 1000;
+
 	sessionState.isRunning = true;
 	sessionState.isPaused = false;
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.runningRuntime(sessionState.state.session.date, currentTask.id, endsAtMs),
+	);
 	ensureTickerRunning();
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
+	await refreshToolbarAction(sessionState.state, true);
 
 	return sessionState.state;
 }
 
 export async function pauseSession(): Promise<PracticeState | null> {
-	sessionState.isRunning = false;
-	sessionState.isPaused = true;
-	sessionState.pausedAtMs = Date.now();
-	stopTicker();
+	await ensureInitialized();
+	// Materialize elapsed time up to now first, in case a suspension occurred
+	// since the deadline was set. The task may have completed while the
+	// worker was asleep, in which case the session is stopped but not paused.
+	await materializeRunningTimer(Date.now());
 
-	// Persist the current session
+	stopTicker();
+	sessionState.isRunning = false;
+	sessionState.isPaused = !(sessionState.state?.session.done ?? false);
+
 	if (sessionState.state) {
 		sessionState.state = await db.saveState(sessionState.state);
 	}
 
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-
-	return sessionState.state;
-}
-
-export async function resumeSession(): Promise<PracticeState | null> {
-	if (sessionState.state?.session.done) {
-		sessionState.isRunning = false;
-		sessionState.isPaused = false;
-		stopTicker();
-		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-		return sessionState.state;
-	}
-	sessionState.isRunning = true;
-	sessionState.isPaused = false;
-	ensureTickerRunning();
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-
-	return sessionState.state;
-}
-
-export async function decrementTimer(
-	seconds: number,
-): Promise<PracticeState | null> {
-	if (!sessionState.state || !sessionState.isRunning) {
-		return sessionState.state || null;
-	}
-	let completedTask = false;
-	if (sessionState.state.session.done) {
-		sessionState.isRunning = false;
-		sessionState.isPaused = false;
-		stopTicker();
-		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-		return sessionState.state;
-	}
-
-	const currentTask = sessionState.state.session.tasks.find(
-		(t) => t.id === sessionState.state?.session.currentTaskId,
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.stoppedRuntime(
+			sessionState.state?.session.date ?? null,
+			sessionState.state?.session.currentTaskId ?? null,
+			sessionState.isPaused,
+		),
 	);
 
-	if (!currentTask) {
-		sessionState.isRunning = false;
-		sessionState.isPaused = false;
-		stopTicker();
-		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-		return sessionState.state;
-	}
-
-	// Decrement the current task's remaining time
-	currentTask.remainingSeconds = Math.max(
-		0,
-		currentTask.remainingSeconds - seconds,
-	);
-
-	// If task is complete, mark it and move to next
-	if (currentTask.remainingSeconds === 0 && currentTask.completedAt === null) {
-		completedTask = true;
-		currentTask.completedAt = formatLosAngelesTimestamp();
-		const currentTaskIndex = sessionState.state.session.tasks.findIndex(
-			(task) => task.id === currentTask.id,
-		);
-
-		// Find next incomplete task
-		const nextTask =
-			sessionState.state.session.tasks
-				.slice(currentTaskIndex + 1)
-				.find((task) => task.completedAt === null) ??
-			sessionState.state.session.tasks.find((task) => task.completedAt === null) ??
-			null;
-
-		if (nextTask) {
-			sessionState.state.session.currentTaskId = nextTask.id;
-			// Completing a task should not auto-run the next one.
-			sessionState.isRunning = false;
-			sessionState.isPaused = true;
-			stopTicker();
-		} else {
-			// All tasks complete
-			sessionState.state.session.done = true;
-			sessionState.state.session.currentTaskId =
-				sessionState.state.session.tasks[sessionState.state.session.tasks.length - 1]?.id ??
-				null;
-			sessionState.isRunning = false;
-			sessionState.isPaused = false;
-			stopTicker();
-		}
-	}
-
-	// Persist state periodically (e.g., every 10 decrements)
-	// For now, persist on every change to ensure no data loss
-	sessionState.state = await db.saveState(sessionState.state);
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-	if (completedTask) {
-		await maybePlayCompletionAlarm();
-	}
+	await refreshToolbarAction(sessionState.state, false);
 
 	return sessionState.state;
 }
@@ -562,6 +660,7 @@ export async function decrementTimer(
 export async function saveSession(
 	state: PracticeState,
 ): Promise<PracticeState> {
+	await ensureInitialized();
 	sessionState.state = await db.saveState(state);
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 	return sessionState.state;
@@ -570,6 +669,7 @@ export async function saveSession(
 export async function newDay(
 	template?: PracticeTemplateTask[],
 ): Promise<PracticeState> {
+	await ensureInitialized();
 	if (template) {
 		sessionState.state = await db.newDay(template);
 	} else {
@@ -580,16 +680,31 @@ export async function newDay(
 	sessionState.isRunning = false;
 	sessionState.isPaused = false;
 	stopTicker();
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.stoppedRuntime(
+			sessionState.state.session.date,
+			sessionState.state.session.currentTaskId,
+			false,
+		),
+	);
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
 }
 
 export async function resetToDefaults(): Promise<PracticeState> {
+	await ensureInitialized();
 	sessionState.state = await db.resetToDefaults();
 	sessionState.isRunning = false;
 	sessionState.isPaused = false;
 	stopTicker();
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.stoppedRuntime(
+			sessionState.state.session.date,
+			sessionState.state.session.currentTaskId,
+			false,
+		),
+	);
 	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
 
 	return sessionState.state;
@@ -598,6 +713,7 @@ export async function resetToDefaults(): Promise<PracticeState> {
 export async function editTemplate(
 	template: PracticeTemplateTask[],
 ): Promise<PracticeState> {
+	await ensureInitialized();
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();
 	}
@@ -616,105 +732,46 @@ export async function editTemplate(
 }
 
 export async function completeCurrentTaskAndAdvanceNoStart(): Promise<PracticeState | null> {
+	await ensureInitialized();
 	if (!sessionState.state) {
 		sessionState.state = await db.loadState();
 	}
 	if (!sessionState.state) return null;
-	let completedTask = false;
 
-	sessionState.isRunning = false;
-	sessionState.isPaused = true;
 	stopTicker();
+	sessionState.isRunning = false;
 
-	const session = sessionState.state.session;
-	if (session.done || session.tasks.length === 0) {
-		sessionState.state = await db.saveState(sessionState.state);
-		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-		return sessionState.state;
-	}
+	const { session, completedTaskId } = completeCurrentTaskAndAdvance(
+		sessionState.state.session,
+	);
+	sessionState.state = await db.saveState({ ...sessionState.state, session });
+	sessionState.isPaused = !sessionState.state.session.done;
 
-	const currentTask =
-		session.tasks.find((task) => task.id === session.currentTaskId) ??
-		session.tasks[0] ??
-		null;
-	if (!currentTask) {
-		session.done = true;
-		session.currentTaskId = null;
-		sessionState.state = await db.saveState(sessionState.state);
-		await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-		return sessionState.state;
-	}
+	await timerRuntime.saveTimerRuntime(
+		timerRuntime.stoppedRuntime(
+			sessionState.state.session.date,
+			sessionState.state.session.currentTaskId,
+			sessionState.isPaused,
+		),
+	);
 
-	const currentTaskIndex = session.tasks.findIndex((task) => task.id === currentTask.id);
-	if (currentTask.completedAt === null) {
-		completedTask = true;
-		currentTask.completedAt = formatLosAngelesTimestamp();
-		currentTask.remainingSeconds = 0;
-	}
-
-	const nextTask =
-		session.tasks
-			.slice(Math.max(0, currentTaskIndex + 1))
-			.find((task) => task.completedAt === null) ??
-		session.tasks.find((task) => task.completedAt === null) ??
-		null;
-
-	if (nextTask) {
-		session.currentTaskId = nextTask.id;
-		session.done = false;
-	} else {
-		session.done = true;
-		session.currentTaskId =
-			session.tasks[session.tasks.length - 1]?.id ?? currentTask.id ?? null;
-	}
-
-	sessionState.state = await db.saveState(sessionState.state);
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-	if (completedTask) {
+	await refreshToolbarAction(sessionState.state, false);
+	if (completedTaskId) {
 		await maybePlayCompletionAlarm();
 	}
 	return sessionState.state;
 }
 
-export async function updateToolbarStatus(
-	state: PracticeState,
-	isRunning: boolean,
-	timestampMs?: number,
-	forceStopped?: boolean,
-): Promise<{ ok: true; ignored?: true }> {
-	const safeTimestamp = Math.max(0, Math.floor(timestampMs ?? Date.now()));
-	if (safeTimestamp < lastToolbarStatusUpdateMs) {
-		return { ok: true, ignored: true };
-	}
-	lastToolbarStatusUpdateMs = safeTimestamp;
-
-	sessionState.state = state;
-	sessionState.isRunning =
-		!state.session.done && !forceStopped && Boolean(isRunning);
-	sessionState.isPaused = !sessionState.isRunning;
-	if (sessionState.isRunning) {
-		ensureTickerRunning();
-	} else {
-		stopTicker();
-	}
-	await refreshToolbarAction(sessionState.state, sessionState.isRunning);
-	return { ok: true };
-}
-
 export function handleBackgroundTickAlarm(alarm: chrome.alarms.Alarm): void {
-	if (alarm.name !== BACKGROUND_TICK_ALARM || !sessionState.isRunning) return;
-	const elapsedSeconds = elapsedSecondsSinceLastTick();
-	if (elapsedSeconds <= 1) return;
-	void runBackgroundTick(elapsedSeconds);
-}
-
-export async function initializeActionContextMenu(): Promise<void> {
-	await refreshActionContextMenu(sessionState.state, sessionState.isRunning);
+	if (alarm.name !== BACKGROUND_TICK_ALARM) return;
+	void materializeRunningTimer(Date.now()).catch((error) => {
+		console.error("Failed to materialize running timer from alarm", error);
+	});
 }
 
 export async function handleActionContextMenuClick(
 	menuItemId: string,
-	checked?: boolean,
+	_checked?: boolean,
 ): Promise<void> {
 	switch (menuItemId) {
 		case CONTEXT_MENU_PLAY:

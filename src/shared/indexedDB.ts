@@ -2,6 +2,7 @@ import type {
 	PracticeState,
 	PracticeTemplateTask,
 	PracticeSession,
+	PracticeSessionSummary,
 } from "./practice";
 import {
 	DEFAULT_TEMPLATE,
@@ -138,23 +139,31 @@ async function loadSession(date: string): Promise<PracticeSession | null> {
 	});
 }
 
-export async function listSessionDates(): Promise<string[]> {
+export async function listSessionSummaries(): Promise<PracticeSessionSummary[]> {
 	const database = await _getDB();
 	const tx = database.transaction(SESSIONS_STORE, "readonly");
 	const store = tx.objectStore(SESSIONS_STORE);
 
 	return new Promise((resolve, reject) => {
-		const request = store.getAllKeys();
+		const request = store.getAll();
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => {
-			const keys = request.result as string[];
-			resolve(keys.sort());
+			const sessions = request.result as PracticeSession[];
+			const summaries = sessions
+				.map((session) => ({
+					date: session.date,
+					completed:
+						session.done ||
+						session.tasks.every((task) => task.completedAt !== null),
+				}))
+				.sort((a, b) => a.date.localeCompare(b.date));
+			resolve(summaries);
 		};
 	});
 }
 
 export async function loadState(): Promise<PracticeState> {
-	const database = await _getDB();
+	await _getDB();
 	const template = await loadTemplate();
 	const today = getLosAngelesDateString();
 	const storedSession = await loadSession(today);
