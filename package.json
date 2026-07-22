@@ -1,68 +1,69 @@
 {
-	"name": "court-interpreter-toolkit",
-	"version": "1.5.0",
-	"description": "A local-first Chrome extension for structured court-interpreter practice sessions: timed task drills, daily history, and notes.",
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/iknowmagic/court-interpreter-toolkit-chrome.git"
-	},
-	"homepage": "https://court-interpreter-toolkit.cod3naut.com/",
-	"bugs": {
-		"url": "https://github.com/iknowmagic/court-interpreter-toolkit-chrome/issues"
-	},
-	"packageManager": "pnpm@11.9.0",
-	"engines": {
-		"node": ">=24.18.0 <25",
-		"pnpm": ">=11.9.0 <12"
-	},
-	"scripts": {
-		"build": "pnpm build:chrome",
-		"build:chrome": "vite build --config vite.config.chrome.ts --mode production",
-		"build:chrome:dev": "vite build --config vite.config.chrome.ts --mode development",
-		"dev": "pnpm dev:chrome",
-		"dev:chrome": "nodemon --config nodemon.chrome.json",
-		"ladle": "ladle serve",
-		"ladle:build": "ladle build",
-		"typecheck": "tsc --noEmit",
-		"lint": "eslint .",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"verify:chrome-build": "node scripts/verify-chrome-build.mjs",
-		"check:builds": "pnpm build:chrome && pnpm verify:chrome-build -- production && pnpm build:chrome:dev && pnpm verify:chrome-build -- development && pnpm build:chrome && pnpm verify:chrome-build -- production",
-		"check": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:builds && pnpm ladle:build",
-		"build:zip": "pnpm build:chrome && pnpm verify:chrome-build -- production && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\""
-	},
-	"type": "module",
-	"dependencies": {
-		"react": "^19.2.8",
-		"react-dom": "^19.2.8"
-	},
-	"devDependencies": {
-		"@crxjs/vite-plugin": "^2.7.1",
-		"@eslint/js": "^9.39.5",
-		"@ladle/react": "^5.1.1",
-		"@tailwindcss/vite": "^4.3.3",
-		"@testing-library/jest-dom": "^6.10.0",
-		"@testing-library/react": "^16.3.2",
-		"@types/chrome": "^0.1.43",
-		"@types/node": "^24.13.3",
-		"@types/react": "^19.2.17",
-		"@types/react-dom": "^19.2.3",
-		"@vitejs/plugin-react": "^4.7.0",
-		"eslint": "^9.39.5",
-		"eslint-plugin-jsx-a11y": "^6.10.2",
-		"eslint-plugin-react": "^7.37.5",
-		"eslint-plugin-react-hooks": "^5.2.0",
-		"fake-indexeddb": "^6.2.5",
-		"globals": "^15.15.0",
-		"jsdom": "^29.1.1",
-		"nodemon": "^3.1.14",
-		"tailwindcss": "^4.3.3",
-		"typescript": "^5.9.3",
-		"typescript-eslint": "^8.65.0",
-		"vite": "^6.4.3",
-		"vite-tsconfig-paths": "^5.1.4",
-		"vitest": "^4.1.10"
-	}
+  "name": "court-interpreter-toolkit",
+  "version": "1.5.0",
+  "description": "A local-first Chrome extension for structured court-interpreter practice sessions: timed task drills, daily history, and notes.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iknowmagic/court-interpreter-toolkit-chrome.git"
+  },
+  "homepage": "https://court-interpreter-toolkit.cod3naut.com/",
+  "bugs": {
+    "url": "https://github.com/iknowmagic/court-interpreter-toolkit-chrome/issues"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.18.0 <25",
+    "pnpm": ">=11.9.0 <12"
+  },
+  "scripts": {
+    "build": "pnpm build:chrome",
+    "build:chrome": "vite build --config vite.config.chrome.ts --mode production",
+    "build:chrome:dev": "vite build --config vite.config.chrome.ts --mode development",
+    "dev": "pnpm dev:chrome",
+    "dev:chrome": "nodemon --config nodemon.chrome.json",
+    "ladle": "ladle serve",
+    "ladle:build": "ladle build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --reporter=verbose --coverage",
+    "verify:chrome-build": "node scripts/verify-chrome-build.mjs",
+    "check:builds": "pnpm build:chrome && pnpm verify:chrome-build -- production && pnpm build:chrome:dev && pnpm verify:chrome-build -- development && pnpm build:chrome && pnpm verify:chrome-build -- production",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:builds && pnpm ladle:build",
+    "build:zip": "pnpm build:chrome && pnpm verify:chrome-build -- production && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\""
+  },
+  "type": "module",
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.7.1",
+    "@eslint/js": "^9.39.5",
+    "@ladle/react": "^5.1.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^6.10.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/chrome": "^0.1.43",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^15.15.0",
+    "jsdom": "^29.1.1",
+    "nodemon": "^3.1.14",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^6.4.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^4.1.10"
+  }
 }
