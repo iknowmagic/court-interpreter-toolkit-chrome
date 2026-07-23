@@ -74,7 +74,7 @@ src/
   utils/
     chromeRPC.ts             typed wrapper over chrome.runtime.sendMessage
 public/
-  welcome.html, alarm-player.html/js, icons, screenshot.png
+  welcome.html/js, alarm-player.html/js, icons, screenshot.png
 ```
 
 ## Prerequisites

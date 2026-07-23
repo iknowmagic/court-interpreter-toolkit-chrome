@@ -13,6 +13,7 @@ const REQUIRED_SURFACE_FILES = [
 	"src/pages/popup/index.html",
 	"src/pages/options/index.html",
 	"welcome.html",
+	"welcome.js",
 	"alarm-player.html",
 	"alarm-player.js",
 ];

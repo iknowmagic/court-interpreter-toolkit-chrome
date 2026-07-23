@@ -11,7 +11,8 @@ export default tseslint.config(
 			"dist_chrome/**",
 			"node_modules/**",
 			".ladle/**",
-			"public/**",
+			"public/*",
+			"!public/welcome.js",
 			"tmp/**",
 			"build/**",
 		],
@@ -19,7 +20,7 @@ export default tseslint.config(
 	js.configs.recommended,
 	...tseslint.configs.recommended,
 	{
-		files: ["**/*.{ts,tsx,mjs}"],
+		files: ["**/*.{ts,tsx,mjs}", "public/welcome.js"],
 		languageOptions: {
 			globals: {
 				...globals.browser,
