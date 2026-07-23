@@ -52,10 +52,22 @@ async function renderReady() {
 
 async function renderLoadError(message = "network down") {
   mockedRpc.loadState.mockRejectedValueOnce(new Error(message));
-  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const consoleErrorSpy = captureExpectedConsoleError();
   const view = renderHook(() => usePracticeSession());
   await waitFor(() => expect(view.result.current.loadStatus).toBe("error"));
   return { view, consoleErrorSpy };
+}
+
+function captureExpectedConsoleError() {
+  return vi.spyOn(console, "error").mockImplementation(() => {});
+}
+
+function expectExpectedConsoleError(
+  consoleErrorSpy: ReturnType<typeof captureExpectedConsoleError>,
+  message: string,
+) {
+  expect(consoleErrorSpy).toHaveBeenCalledWith(message, expect.any(Error));
+  expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
 }
 
 async function renderRunningWithFakeTimers() {
@@ -162,21 +174,26 @@ describe("autosave and notes", () => {
   it("shows an error status when the note autosave fails", async () => {
     mockedRpc.saveState.mockRejectedValue(new Error("save failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     act(() => result.current.updateNote("task-a", "will fail"));
     await waitFor(() => expect(result.current.noteSaveStatus).toBe("error"));
     expect(result.current.operationError).toBe("save failed");
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to save changes.");
   });
 
   it("clears a prior save error once a later note save succeeds", async () => {
     mockedRpc.saveState.mockRejectedValueOnce(new Error("save failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     act(() => result.current.updateNote("task-a", "first edit"));
     await waitFor(() => expect(result.current.noteSaveStatus).toBe("error"));
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to save changes.");
 
     act(() => result.current.updateNote("task-a", "second edit"));
     await waitFor(() => expect(result.current.noteSaveStatus).toBe("saved"));
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to save changes.");
   });
 
   it("clears the pending autosave timer on unmount", async () => {
@@ -227,6 +244,7 @@ describe("play, stop, done", () => {
   it("surfaces an operation error and does not optimistically mark running on play failure", async () => {
     mockedRpc.startSession.mockRejectedValue(new Error("start failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.play();
@@ -234,6 +252,7 @@ describe("play, stop, done", () => {
 
     expect(result.current.operationError).toBe("start failed");
     expect(result.current.running).toBe(false);
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to start the session.");
   });
 
   it("stop applies the paused authoritative state", async () => {
@@ -252,6 +271,7 @@ describe("play, stop, done", () => {
     mockedRpc.pauseSession.mockRejectedValue(new Error("stop failed"));
     const { result } = await renderReady();
     const sessionBefore = result.current.session;
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.stop();
@@ -259,6 +279,7 @@ describe("play, stop, done", () => {
 
     expect(result.current.operationError).toBe("stop failed");
     expect(result.current.session).toBe(sessionBefore);
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to stop the session.");
   });
 
   it("done saves first, completes via RPC, remains stopped, and advances", async () => {
@@ -281,12 +302,14 @@ describe("play, stop, done", () => {
   it("done failure shows the existing operation error", async () => {
     mockedRpc.completeCurrentTaskAndAdvance.mockRejectedValue(new Error("done failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.completeAndNext();
     });
 
     expect(result.current.operationError).toBe("done failed");
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to complete the current task.");
   });
 });
 
@@ -310,6 +333,7 @@ describe("mutations", () => {
     mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
     const { result } = await renderReady();
     const before = result.current.session.currentTaskId;
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.selectTask("task-b");
@@ -317,6 +341,7 @@ describe("mutations", () => {
 
     expect(result.current.operationError).toBe("pause failed");
     expect(result.current.session.currentTaskId).toBe(before);
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to pause before selecting that task.");
   });
 
   it("adds a new task to the template and selects it", async () => {
@@ -437,6 +462,7 @@ describe("mutations", () => {
     mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
     const { result } = await renderReady();
     const before = result.current.template.map((t) => t.id);
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.moveTask(1);
@@ -444,6 +470,7 @@ describe("mutations", () => {
 
     expect(result.current.operationError).toBe("pause failed");
     expect(result.current.template.map((t) => t.id)).toEqual(before);
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to pause before moving the task.");
   });
 
   it("resets the active task's progress without a pause round-trip", async () => {
@@ -494,6 +521,7 @@ describe("mutations", () => {
   it("shows an error when pausing before a hard reset fails", async () => {
     mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.resetDefaults();
@@ -501,17 +529,20 @@ describe("mutations", () => {
 
     expect(result.current.operationError).toBe("pause failed");
     expect(mockedRpc.resetToDefaults).not.toHaveBeenCalled();
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to pause before resetting the list.");
   });
 
   it("shows an error when resetToDefaults itself fails", async () => {
     mockedRpc.resetToDefaults.mockRejectedValue(new Error("reset failed"));
-    const { result } = await renderReady();
+    const view = await renderReady();
+    const { result } = view;
+    const consoleErrorSpy = captureExpectedConsoleError();
 
-    await act(async () => {
-      await result.current.resetDefaults();
-    });
+    await act(() => result.current.resetDefaults());
 
     expect(result.current.operationError).toBe("reset failed");
+    expect(mockedRpc.pauseSession).toHaveBeenCalledTimes(1);
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to reset the list.");
   });
 
   it("keeps the session stopped after successful mutations", async () => {
@@ -604,6 +635,7 @@ describe("date and history navigation", () => {
   it("aborts date navigation when the pre-navigation pause fails", async () => {
     mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
 
     await act(async () => {
       await result.current.loadDate("2020-01-01");
@@ -611,18 +643,24 @@ describe("date and history navigation", () => {
 
     expect(result.current.operationError).toBe("pause failed");
     expect(result.current.isViewingToday).toBe(true);
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to pause before changing date.");
   });
 
   it("shows an error when the date fetch itself fails after a successful pause", async () => {
     mockedRpc.readStateByDate.mockRejectedValue(new Error("fetch failed"));
     const { result } = await renderReady();
+    const consoleErrorSpy = captureExpectedConsoleError();
+    let loaded = true;
 
     await act(async () => {
-      await result.current.loadDate("2020-01-01");
+      loaded = await result.current.loadDate("2020-01-01");
     });
 
+    expect(loaded).toBe(false);
     expect(result.current.operationError).toBe("fetch failed");
     expect(result.current.isViewingToday).toBe(true);
+    expect(mockedRpc.readStateByDate).toHaveBeenCalledWith("2020-01-01");
+    expectExpectedConsoleError(consoleErrorSpy, "Failed to load that date.");
   });
 
   it("ignores a stale earlier date response once a later selection has landed", async () => {
@@ -683,10 +721,12 @@ describe("polling", () => {
       const sessionBefore = result.current.session;
 
       mockedRpc.getSessionState.mockRejectedValue(new Error("poll failed"));
+      const consoleErrorSpy = captureExpectedConsoleError();
       await advancePollingInterval();
 
       expect(result.current.operationError).toBe("poll failed");
       expect(result.current.session).toBe(sessionBefore);
+      expectExpectedConsoleError(consoleErrorSpy, "Failed to sync the running session.");
     } finally {
       vi.useRealTimers();
     }

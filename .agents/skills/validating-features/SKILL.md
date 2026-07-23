@@ -31,7 +31,8 @@ Run:
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm test -- <focused-test-file>
+pnpm exec vitest run <focused-test-file>
+pnpm exec vitest run <focused-test-file> <another-focused-test-file>
 git diff --check
 ```
 
@@ -40,7 +41,8 @@ git diff --check
 Run:
 
 ```bash
-pnpm test -- <focused-test-file>
+pnpm exec vitest run <focused-test-file>
+pnpm exec vitest run <focused-test-file> <another-focused-test-file>
 pnpm lint
 pnpm typecheck
 ```
@@ -91,6 +93,7 @@ pnpm check
 - lint
 - typecheck
 - coverage
+- exact duplicate detection
 - production build verification
 
 Do not run the same full suite multiple times without a reason.

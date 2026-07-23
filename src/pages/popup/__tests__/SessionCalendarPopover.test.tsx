@@ -195,10 +195,12 @@ describe("SessionCalendarPopover", () => {
     expect(screen.getByRole("button", { name: "Open calendar" })).toHaveFocus();
   });
 
-  it("closes the popover on an outside click but not a click inside it", async () => {
+  it("closes on an outside click without stealing focus, but not on an inside click", async () => {
     render(
       <div>
-        <div data-testid="outside">outside</div>
+        <button type="button" data-testid="outside">
+          Outside
+        </button>
         <SessionCalendarPopover {...(baseProps())} />
       </div>,
     );
@@ -209,10 +211,13 @@ describe("SessionCalendarPopover", () => {
     fireEvent.mouseDown(within(dialog).getByText("Session Calendar"));
     expect(screen.getByRole("dialog", { name: /Session Calendar/ })).toBeInTheDocument();
 
-    fireEvent.mouseDown(screen.getByTestId("outside"));
+    const outsideButton = screen.getByTestId("outside");
+    outsideButton.focus();
+    fireEvent.mouseDown(outsideButton);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await flushCalendarPositioning();
-    expect(screen.getByRole("button", { name: "Open calendar" })).toHaveFocus();
+    expect(outsideButton).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open calendar" })).not.toHaveFocus();
   });
 
   it("repositions on window resize and scroll while open", async () => {

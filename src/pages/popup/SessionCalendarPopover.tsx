@@ -202,7 +202,7 @@ export default function SessionCalendarPopover({
       const insideTrigger = calendarPopoverAnchorRef.current?.contains(target);
       const insidePopover = calendarPopoverPanelRef.current?.contains(target);
       if (!insideTrigger && !insidePopover) {
-        closeCalendarPopover(true);
+        closeCalendarPopover(false);
       }
     };
 

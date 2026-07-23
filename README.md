@@ -108,11 +108,16 @@ pnpm build:chrome:dev    # development build to dist_chrome/ (vite --mode develo
 pnpm verify:chrome-build -- production|development   # asserts the last dist_chrome/ build matches that mode
 pnpm check:build         # production build+verify, leaving dist_chrome/ as the production artifact
 pnpm ladle:build         # builds the Ladle story catalog to ./build (repository-local)
-pnpm check               # lint + typecheck + coverage + duplicate scan + check:build
+pnpm detect-duplicates   # exact TypeScript/TSX clone detection with jscpd
+pnpm similarity          # structural TypeScript similarity; requires similarity-ts on PATH
+pnpm duplicates          # combined exact + structural report written under tmp/
+pnpm check               # lint + typecheck + coverage + exact duplicate scan + check:build
 pnpm build:zip           # build:chrome, verify it, then zip dist_chrome into tmp/
 ```
 
-`pnpm check` is the full quality gate: it fails on any lint/type/test error, on a development artifact leaking into a production build (or vice versa), or on a broken Ladle build.
+`pnpm check` is the automated production quality gate. It runs linting, TypeScript checking, coverage with configured thresholds, exact clone detection, and a clean production Chrome build followed by artifact verification.
+
+Run `pnpm ladle:build` when story files or Ladle configuration change. Run `pnpm duplicates` when performing a broader duplicate review that includes `similarity-ts` structural analysis.
 
 ## Test strategy
 

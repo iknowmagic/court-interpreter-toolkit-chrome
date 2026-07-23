@@ -132,7 +132,7 @@ body.popup-mode {
 }
 
 .practice-task:hover {
-	background: #faf5ee;
+	background: #faf5ee !important;
 }
 
 .practice-btn:hover:not(:disabled) {

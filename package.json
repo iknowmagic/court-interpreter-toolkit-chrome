@@ -32,7 +32,7 @@
     "coverage": "vitest run --coverage",
     "detect-duplicates": "jscpd src --format \"ts,tsx\"",
     "similarity": "PATH=\"$HOME/.cargo/bin:$PATH\" similarity-ts src --threshold 0.85 --exclude \"**/*.test.*\"",
-    "duplicates": "python ./scripts/duplicates-report.py > ./tmp/duplicates-$(date +%s).txt",
+    "duplicates": "mkdir -p ./tmp && python3 ./scripts/duplicates-report.py > ./tmp/duplicates-$(date +%s).txt",
     "verify:chrome-build": "node scripts/verify-chrome-build.mjs",
     "check:build": "pnpm build:chrome && pnpm verify:chrome-build -- production",
     "check": "pnpm lint && pnpm typecheck && pnpm coverage && pnpm detect-duplicates && pnpm check:build",
