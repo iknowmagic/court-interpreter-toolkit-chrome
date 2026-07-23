@@ -1,12 +1,48 @@
 import { describe, expect, it } from "vitest";
 import {
   createFreshSession,
+  formatLosAngelesDateLabel,
   reconcileSessionWithTemplate,
   type PracticeSession,
   type PracticeTemplateTask,
 } from "@shared/practice";
 
+describe("formatLosAngelesDateLabel", () => {
+  it("formats a date as a full weekday, month, day, and year label", () => {
+    const label = formatLosAngelesDateLabel(new Date("2026-04-10T12:00:00.000-07:00"));
+    expect(label).toBe("Friday, April 10, 2026");
+  });
+});
+
+describe("createFreshSession", () => {
+  it("sets a null currentTaskId and marks done when the template is empty", () => {
+    const session = createFreshSession([], "2026-04-10");
+    expect(session.currentTaskId).toBeNull();
+    expect(session.done).toBe(true);
+    expect(session.tasks).toEqual([]);
+  });
+});
+
 describe("practice reconciliation", () => {
+  it("defaults a missing note to an empty string when reconciling an existing task", () => {
+    const template: PracticeTemplateTask[] = [{ id: "task-a", name: "Task A", duration: 5 }];
+    const session = createFreshSession(template, "2026-04-10");
+    delete (session.tasks[0] as { note?: string }).note;
+
+    const reconciled = reconcileSessionWithTemplate(template, session);
+    expect(reconciled.tasks[0].note).toBe("");
+  });
+
+  it("clears currentTaskId and marks done when the template becomes empty", () => {
+    const template: PracticeTemplateTask[] = [{ id: "task-a", name: "Task A", duration: 5 }];
+    const session = createFreshSession(template, "2026-04-10");
+
+    const reconciled = reconcileSessionWithTemplate([], session);
+    expect(reconciled.currentTaskId).toBeNull();
+    expect(reconciled.done).toBe(true);
+    expect(reconciled.tasks).toEqual([]);
+  });
+
   it("resets remainingSeconds to full new duration on duration edit", () => {
     const template: PracticeTemplateTask[] = [{ id: "task-a", name: "Task A", duration: 10 }];
     const session = createFreshSession(template, "2026-04-10");
