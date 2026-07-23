@@ -8,6 +8,7 @@ import {
   actWait,
   buildPracticeState,
   flushCalendarPositioning,
+  fullCalendarDateName,
   getEnabledCalendarDay,
   wait,
 } from "./popupTestUtils";
@@ -88,7 +89,7 @@ async function renderReadyPopup(
 
 async function openPopupCalendar(): Promise<HTMLElement> {
   fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-  const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
+  const dialog = await screen.findByRole("dialog", { name: /Session Calendar/ });
   await flushCalendarPositioning();
   return dialog;
 }
@@ -143,7 +144,7 @@ describe("SessionPopup", () => {
     expect(screen.getByRole("button", { name: "↑ Move Up" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete Task" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "▶ Play" })).toBeDisabled();
-    expect(screen.getByPlaceholderText("What did you practice?")).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Practice notes for Task A" })).toBeDisabled();
 
     const root = screen
       .getByText("Court Interpreter Toolkit")
@@ -177,9 +178,26 @@ describe("SessionPopup", () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByRole("dialog", { name: "Session calendar" }),
+        screen.queryByRole("dialog", { name: /Session Calendar/ }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("restores focus to the Add Task opener after closing the task dialog", async () => {
+    await renderReadyPopup();
+
+    const addTaskButton = screen.getByRole("button", { name: "+ Add Task" });
+    addTaskButton.focus();
+    fireEvent.click(addTaskButton);
+
+    expect(screen.getByLabelText("Task Name")).toHaveFocus();
+    fireEvent.keyDown(screen.getByLabelText("Task Name"), {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+    });
+
+    expect(addTaskButton).toHaveFocus();
   });
 
   it("renders an alert with Retry on initial load failure and never autosaves the fallback state", async () => {
@@ -244,7 +262,7 @@ describe("SessionPopup", () => {
     await renderReadyPopup({ state: buildPracticeState(today) });
 
     const dialog = await openPopupCalendar();
-    fireEvent.click(getEnabledCalendarDay(dialog, String(parseDateKey(pastDate).getDate())));
+    fireEvent.click(getEnabledCalendarDay(dialog, fullCalendarDateName(pastDate)));
 
     await waitFor(() => {
       expect(mockedRpc.readStateByDate).toHaveBeenCalledWith(pastDate);
@@ -402,12 +420,12 @@ describe("SessionPopup", () => {
     await renderReadyPopup({ state: buildPracticeState(today) });
 
     const dialog = await openPopupCalendar();
-    fireEvent.click(getEnabledCalendarDay(dialog, String(parseDateKey(firstCallDate).getDate())));
+    fireEvent.click(getEnabledCalendarDay(dialog, fullCalendarDateName(firstCallDate)));
     await waitFor(() => expect(mockedRpc.readStateByDate).toHaveBeenCalledWith(firstCallDate));
 
     // The first request is still pending (unresolved), so the popover is
     // still open; click the second date from the same still-open dialog.
-    fireEvent.click(getEnabledCalendarDay(dialog, String(parseDateKey(secondCallDate).getDate())));
+    fireEvent.click(getEnabledCalendarDay(dialog, fullCalendarDateName(secondCallDate)));
     await waitFor(() => expect(mockedRpc.readStateByDate).toHaveBeenCalledWith(secondCallDate));
 
     await screen.findByText(/Viewing/);

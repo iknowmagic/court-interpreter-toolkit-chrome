@@ -1,7 +1,5 @@
 import * as sessionManager from "../../background/sessionManager";
 
-console.log("background script loaded");
-
 async function handleInstallWelcome(
 	details: chrome.runtime.InstalledDetails,
 ): Promise<void> {

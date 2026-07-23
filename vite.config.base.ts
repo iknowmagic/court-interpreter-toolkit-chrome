@@ -1,7 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { ManifestV3Export } from '@crxjs/vite-plugin';
-import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type UserConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths'
 import manifest from './manifest.json';
@@ -20,7 +19,6 @@ export function createBaseManifest(isDevelopment: boolean): ManifestV3Export {
 export function createBaseConfig(isDevelopment: boolean): UserConfig {
   return defineConfig({
     plugins: [
-      tailwindcss(),
       tsconfigPaths(),
       react(),
       stripDevIcons(isDevelopment),

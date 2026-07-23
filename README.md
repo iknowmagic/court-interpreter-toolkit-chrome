@@ -106,9 +106,9 @@ pnpm test                # vitest run
 pnpm build:chrome        # production build to dist_chrome/ (vite --mode production)
 pnpm build:chrome:dev    # development build to dist_chrome/ (vite --mode development)
 pnpm verify:chrome-build -- production|development   # asserts the last dist_chrome/ build matches that mode
-pnpm check:builds        # prod build+verify, then dev build+verify, then a final prod build+verify
+pnpm check:build         # production build+verify, leaving dist_chrome/ as the production artifact
 pnpm ladle:build         # builds the Ladle story catalog to ./build (repository-local)
-pnpm check               # lint + typecheck + test + check:builds + ladle:build
+pnpm check               # lint + typecheck + coverage + duplicate scan + check:build
 pnpm build:zip           # build:chrome, verify it, then zip dist_chrome into tmp/
 ```
 

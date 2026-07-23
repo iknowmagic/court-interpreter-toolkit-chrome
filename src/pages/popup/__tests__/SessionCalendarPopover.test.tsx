@@ -5,6 +5,7 @@ import SessionCalendarPopover from "@pages/popup/SessionCalendarPopover";
 import { getLosAngelesDateString } from "@shared/practice";
 import {
   flushCalendarPositioning,
+  fullCalendarDateName,
   getEnabledCalendarDay,
 } from "./popupTestUtils";
 
@@ -29,9 +30,27 @@ async function renderOpenPopover(
 ): Promise<HTMLElement> {
   render(<SessionCalendarPopover {...(baseProps(overrides))} />);
   fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-  const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
+  const dialog = await screen.findByRole("dialog", { name: /Session Calendar/ });
   await flushCalendarPositioning();
   return dialog;
+}
+
+async function clickSelectedDateWithResult(
+  onSelectDateResult: boolean,
+): Promise<{ dialog: HTMLElement; onSelectDate: ReturnType<typeof vi.fn> }> {
+  const onSelectDate = vi.fn().mockResolvedValue(onSelectDateResult);
+  const dialog = await renderOpenPopover({ onSelectDate });
+  const selectedDate = getEnabledCalendarDay(
+    dialog,
+    fullCalendarDateName(today, ["selected"]),
+  );
+
+  await act(async () => {
+    fireEvent.click(selectedDate);
+    await Promise.resolve();
+  });
+
+  return { dialog, onSelectDate };
 }
 
 function makeRect(overrides: Partial<DOMRect>): DOMRect {
@@ -56,13 +75,12 @@ describe("SessionCalendarPopover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
     await flushCalendarPositioning();
-    expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /Session Calendar/ })).toBeInTheDocument();
   });
 
   it("disables days with no stored session data other than today", async () => {
     const dialog = await renderOpenPopover({ summaries: [] });
-    const todayDay = new Date().getDate();
-    expect(getEnabledCalendarDay(dialog, String(todayDay))).toBeDefined();
+    expect(getEnabledCalendarDay(dialog, fullCalendarDateName(today, ["selected"]))).toBeDefined();
   });
 
   it.each([
@@ -76,10 +94,30 @@ describe("SessionCalendarPopover", () => {
     },
   ])("marks the selected day complete from $name", async ({ overrides }) => {
     const dialog = await renderOpenPopover(overrides);
-    const todayDay = new Date().getDate();
-    const selectedButton = getEnabledCalendarDay(dialog, String(todayDay));
+    const selectedButton = getEnabledCalendarDay(
+      dialog,
+      fullCalendarDateName(today, ["selected", "completed"]),
+    );
     expect(selectedButton.className).toContain("is-selected");
     expect(selectedButton.className).toContain("is-complete");
+  });
+
+  it("uses full accessible date names with selected and completed state", async () => {
+    const dialog = await renderOpenPopover({
+      summaries: [{ date: today, completed: true }],
+    });
+
+    expect(
+      within(dialog).getByRole("button", {
+        name: fullCalendarDateName(today, ["selected", "completed"]),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("focuses the selected date when the popover opens", async () => {
+    const dialog = await renderOpenPopover();
+
+    expect(getEnabledCalendarDay(dialog, fullCalendarDateName(today, ["selected"]))).toHaveFocus();
   });
 
   it("navigates to the previous and next month", async () => {
@@ -87,11 +125,18 @@ describe("SessionCalendarPopover", () => {
     const currentTitle = within(dialog).getByText(new Date().getFullYear());
     expect(currentTitle).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Previous month" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Next month" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Next month" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Previous month,/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Next month,/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Next month,/ }));
     // Still renders a valid calendar grid after navigation without throwing.
     expect(within(dialog).getByText("Su")).toBeInTheDocument();
+  });
+
+  it("labels month navigation buttons with their target months", async () => {
+    const dialog = await renderOpenPopover();
+
+    expect(within(dialog).getByRole("button", { name: /Previous month, .+ \d{4}/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Next month, .+ \d{4}/ })).toBeInTheDocument();
   });
 
   it.each([
@@ -116,32 +161,38 @@ describe("SessionCalendarPopover", () => {
 
     expect(onToday).toHaveBeenCalledTimes(1);
     if (expectOpen) {
-      expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Session Calendar/ })).toBeInTheDocument();
+      expect(dialog.contains(document.activeElement)).toBe(true);
     } else {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await flushCalendarPositioning();
+      expect(screen.getByRole("button", { name: "Open calendar" })).toHaveFocus();
     }
   });
 
   it("calls onSelectDate for an enabled day and closes on success", async () => {
-    const onSelectDate = vi.fn().mockResolvedValue(true);
-    const dialog = await renderOpenPopover({ onSelectDate });
-    const todayDay = new Date().getDate();
-    const enabled = getEnabledCalendarDay(dialog, String(todayDay));
-
-    await act(async () => {
-      fireEvent.click(enabled);
-      await Promise.resolve();
-    });
+    const { onSelectDate } = await clickSelectedDateWithResult(true);
 
     expect(onSelectDate).toHaveBeenCalledWith(today);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await flushCalendarPositioning();
+    expect(screen.getByRole("button", { name: "Open calendar" })).toHaveFocus();
   });
 
-  it("closes the popover on Escape", async () => {
+  it("keeps the popover open and focus inside when date selection fails", async () => {
+    const { dialog } = await clickSelectedDateWithResult(false);
+
+    expect(screen.getByRole("dialog", { name: /Session Calendar/ })).toBeInTheDocument();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("closes the popover on Escape and restores trigger focus", async () => {
     await renderOpenPopover();
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await flushCalendarPositioning();
+    expect(screen.getByRole("button", { name: "Open calendar" })).toHaveFocus();
   });
 
   it("closes the popover on an outside click but not a click inside it", async () => {
@@ -152,14 +203,16 @@ describe("SessionCalendarPopover", () => {
       </div>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
+    const dialog = await screen.findByRole("dialog", { name: /Session Calendar/ });
     await flushCalendarPositioning();
 
     fireEvent.mouseDown(within(dialog).getByText("Session Calendar"));
-    expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /Session Calendar/ })).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByTestId("outside"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await flushCalendarPositioning();
+    expect(screen.getByRole("button", { name: "Open calendar" })).toHaveFocus();
   });
 
   it("repositions on window resize and scroll while open", async () => {
@@ -169,13 +222,13 @@ describe("SessionCalendarPopover", () => {
       fireEvent(window, new Event("resize"));
       fireEvent.scroll(window, {});
     }).not.toThrow();
-    expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /Session Calendar/ })).toBeInTheDocument();
   });
 
   it("cleans up listeners and animation frames on unmount while open", async () => {
     const { unmount } = render(<SessionCalendarPopover {...(baseProps())} />);
     fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    await screen.findByRole("dialog", { name: "Session calendar" });
+    await screen.findByRole("dialog", { name: /Session Calendar/ });
     await flushCalendarPositioning();
 
     expect(() => unmount()).not.toThrow();

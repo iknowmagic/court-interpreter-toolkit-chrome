@@ -32,6 +32,10 @@ describe("TaskEditorDialog", () => {
   it("shows Add Task title and button in add mode with empty defaults", () => {
     renderDialog();
 
+    expect(screen.getByRole("dialog", { name: "Add Task" })).toHaveAttribute(
+      "aria-modal",
+      "true",
+    );
     expect(screen.getByText("Add Task", { selector: ".practice-modal-title" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Task" })).toBeInTheDocument();
     expect(screen.getByLabelText("Task Name")).toHaveValue("");
@@ -47,6 +51,7 @@ describe("TaskEditorDialog", () => {
     };
     renderDialog({ modal });
 
+    expect(screen.getByRole("dialog", { name: "Edit Task" })).toBeInTheDocument();
     expect(screen.getByText("Edit Task")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeInTheDocument();
     expect(screen.getByLabelText("Task Name")).toHaveValue("Shadowing");
@@ -85,6 +90,73 @@ describe("TaskEditorDialog", () => {
 
     fireEvent.keyDown(screen.getByLabelText("Duration (minutes)"), { key: "Tab" });
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("focuses the task-name input on open", () => {
+    renderDialog();
+
+    expect(screen.getByLabelText("Task Name")).toHaveFocus();
+  });
+
+  it("selects the existing task name in edit mode", () => {
+    const modal: ModalState = {
+      mode: "edit",
+      taskId: "task-a",
+      initialName: "Shadowing",
+      initialDuration: "10",
+    };
+    renderDialog({ modal });
+
+    const nameInput = screen.getByLabelText("Task Name") as HTMLInputElement;
+    expect(nameInput).toHaveFocus();
+    expect(nameInput.selectionStart).toBe(0);
+    expect(nameInput.selectionEnd).toBe("Shadowing".length);
+  });
+
+  it("calls onCancel on Escape", () => {
+    const { onCancel } = renderDialog();
+
+    fireEvent.keyDown(screen.getByLabelText("Task Name"), {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+    });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps Tab from the last focusable control to the first", () => {
+    renderDialog();
+
+    const nameInput = screen.getByLabelText("Task Name");
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    cancelButton.focus();
+
+    window.dispatchEvent(
+      new window.KeyboardEvent("keydown", {
+        key: "Tab",
+        code: "Tab",
+      }),
+    );
+
+    expect(nameInput).toHaveFocus();
+  });
+
+  it("wraps Shift+Tab from the first focusable control to the last", () => {
+    renderDialog();
+
+    const nameInput = screen.getByLabelText("Task Name");
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    nameInput.focus();
+
+    window.dispatchEvent(
+      new window.KeyboardEvent("keydown", {
+        key: "Tab",
+        code: "Tab",
+        shiftKey: true,
+      }),
+    );
+
+    expect(cancelButton).toHaveFocus();
   });
 
   it("calls onCancel from the Cancel button", () => {

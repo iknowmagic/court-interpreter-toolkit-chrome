@@ -8,6 +8,7 @@ import type {
 import { formatDuration } from "@shared/practice";
 import SessionCalendarPopover from "./SessionCalendarPopover";
 import { parseDateKey } from "./sessionPopupUtils";
+import type { NoteSaveStatus } from "./usePracticeSession";
 
 const C = {
   accent: "#c4622d",
@@ -44,6 +45,15 @@ interface SessionWorkspaceProps {
   onCompleteAndNext: () => void;
   onSelectDate: (dateKey: string) => Promise<boolean>;
   onToday: () => Promise<boolean>;
+  noteSaveStatus: NoteSaveStatus;
+  lastNoteSavedAt: string | null;
+}
+
+function noteStatusLabel(status: NoteSaveStatus, lastSavedAt: string | null): string {
+  if (status === "saving") return "Saving notes";
+  if (status === "saved") return lastSavedAt ? `Notes saved at ${lastSavedAt}` : "Notes saved";
+  if (status === "error") return "Notes failed to save";
+  return "";
 }
 
 export default function SessionWorkspace({
@@ -75,6 +85,8 @@ export default function SessionWorkspace({
   onCompleteAndNext,
   onSelectDate,
   onToday,
+  noteSaveStatus,
+  lastNoteSavedAt,
 }: SessionWorkspaceProps): React.JSX.Element {
   const viewingDateLabel = useMemo(
     () =>
@@ -295,11 +307,15 @@ export default function SessionWorkspace({
           </div>
           <textarea
             className="practice-textarea"
+            aria-label={selected ? `Practice notes for ${selected.name}` : "Practice notes"}
             value={selected?.note ?? ""}
             onChange={(event) => selected && onUpdateNote(selected.id, event.target.value)}
             placeholder="What did you practice?"
             disabled={!selected || !isViewingToday}
           />
+          <div className="practice-sr-only" aria-live="polite">
+            {noteStatusLabel(noteSaveStatus, lastNoteSavedAt)}
+          </div>
         </div>
       </section>
     </main>

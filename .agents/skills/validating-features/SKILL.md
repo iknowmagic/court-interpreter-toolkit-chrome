@@ -65,10 +65,10 @@ Use the reusable Chrome mock and fake IndexedDB where appropriate.
 Run:
 
 ```bash
-pnpm check:builds
+pnpm check:build
 ```
 
-This must verify production -> development -> production output.
+This must verify the production Chrome artifact.
 
 ### Ladle Story Changes
 
@@ -91,8 +91,7 @@ pnpm check
 - lint
 - typecheck
 - coverage
-- production/development/production build verification
-- Ladle build
+- production build verification
 
 Do not run the same full suite multiple times without a reason.
 

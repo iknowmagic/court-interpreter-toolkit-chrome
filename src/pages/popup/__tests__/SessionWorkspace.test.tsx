@@ -40,6 +40,8 @@ function baseProps(overrides: Partial<WorkspaceProps> = {}): WorkspaceProps {
     onCompleteAndNext: vi.fn(),
     onSelectDate: vi.fn().mockResolvedValue(true),
     onToday: vi.fn().mockResolvedValue(true),
+    noteSaveStatus: "idle",
+    lastNoteSavedAt: null,
     ...overrides,
   };
 }
@@ -82,7 +84,7 @@ describe("SessionWorkspace", () => {
     expect(screen.getByRole("button", { name: "Edit Task" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete Task" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reset List" })).toBeDisabled();
-    expect(screen.getByPlaceholderText("What did you practice?")).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Practice notes for Task A" })).toBeDisabled();
   });
 
   it("shows the completed timestamp for a completed selected task while viewing today", () => {
@@ -161,7 +163,7 @@ describe("SessionWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /Task B/ }));
     expect(onSelectTask).toHaveBeenCalledWith("task-b");
 
-    fireEvent.change(screen.getByPlaceholderText("What did you practice?"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Practice notes for Task A" }), {
       target: { value: "practiced" },
     });
     expect(onUpdateNote).toHaveBeenCalledWith("task-a", "practiced");
@@ -206,5 +208,19 @@ describe("SessionWorkspace", () => {
   it("renders the calendar popover integration point", () => {
     render(<SessionWorkspace {...(baseProps())} />);
     expect(screen.getByRole("button", { name: "Open calendar" })).toBeInTheDocument();
+  });
+
+  it("labels task notes and exposes save status through a polite live region", () => {
+    render(
+      <SessionWorkspace
+        {...(baseProps({ noteSaveStatus: "saved", lastNoteSavedAt: "10:15 AM" }))}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Practice notes for Task A" })).toBeInTheDocument();
+    expect(screen.getByText("Notes saved at 10:15 AM")).toHaveAttribute(
+      "aria-live",
+      "polite",
+    );
   });
 });

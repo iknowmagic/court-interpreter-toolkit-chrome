@@ -21,7 +21,7 @@ All notable changes to this project are documented here.
 - `PracticeSessionSummary` + `listSessionSummaries()`: the calendar's data/completion markers now come from one summary query instead of one full session load per date.
 - Direct background `sessionManager` test suite (`src/background/__tests__/sessionManager.test.ts`) covering restart, idempotent materialization, expiry/completion, date rollover, malformed-runtime safety, single-flight materialization concurrency/retry, paused-state transitions, and context-menu commands, plus a reusable `chrome.*` test mock (`src/test/chromeMock.ts`).
 - ESLint 9 flat config and a real CI workflow running on push/PR/dispatch.
-- `scripts/verify-chrome-build.mjs` and `pnpm check:builds`: an executable check (not just a manual smoke test) that a production build never contains development name/icons/source maps and that a development build always contains its own name/icons/source maps, run production → development → production to prove a mode switch never leaves stale artifacts behind.
+- `scripts/verify-chrome-build.mjs` and `pnpm check:build`: an executable check (not just a manual smoke test) that a production build never contains development name/icons/source maps and leaves `dist_chrome/` as a verified production artifact.
 - Pinned the local toolchain (Node `24.18.0`, pnpm `11.9.0`) via `.nvmrc`, `package.json` `engines`/`packageManager`, and matching CI setup steps.
 
 ### Changed
@@ -32,7 +32,7 @@ All notable changes to this project are documented here.
 - Added themed task-list scrollbar styling with `scrollbar-color: #e9d0a8 #fdfaf5` and matching WebKit thumb/track rules.
 - Package metadata now reflects the actual product (`court-interpreter-toolkit`, correct repository/homepage/bugs URLs) instead of the upstream Vite extension template.
 - Vite configuration was refactored to mode-based factories (`createBaseManifest`/`createBaseConfig` in `vite.config.base.ts`): `vite.config.chrome.ts` now derives development vs. production purely from Vite's `mode`, replacing the previous private `__DEV__` environment variable contract. Both modes now set `emptyOutDir: true` so every build is a clean one-shot build.
-- `pnpm check` now runs `check:builds` (a full production/development/production build-and-verify cycle) and `ladle:build`, in addition to lint/typecheck/test, so the quality gate covers both Chrome build modes and the Ladle story catalog.
+- `pnpm check` now runs `check:build`, in addition to lint/typecheck/coverage and duplicate scanning, so the quality gate verifies the Chrome production build artifact.
 
 ### Removed
 - Unused starter-template surfaces: content script, devtools panel, new-tab override, side panel, `SessionTimer`/`TaskCustomizer` components, i18n locales scaffold, and Firefox build config.

@@ -84,19 +84,34 @@ export async function flushCalendarPositioning(): Promise<void> {
   });
 }
 
+export function fullCalendarDateName(
+  dateKey: string,
+  states: Array<"selected" | "completed"> = [],
+): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const label = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+  return [label, ...states].join(", ");
+}
+
 export function getEnabledCalendarDay(
   dialog: HTMLElement,
-  dayLabel: string,
+  accessibleName: string | RegExp,
 ): HTMLButtonElement {
   const enabled = within(dialog)
-    .getAllByRole("button", { name: dayLabel })
+    .getAllByRole("button", { name: accessibleName })
     .find(
       (button): button is HTMLButtonElement =>
         !(button as HTMLButtonElement).disabled,
     );
 
   if (!enabled) {
-    throw new Error(`No enabled calendar day button "${dayLabel}" was found.`);
+    throw new Error(`No enabled calendar day button "${accessibleName}" was found.`);
   }
 
   return enabled;

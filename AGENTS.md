@@ -8,7 +8,7 @@
 - Data flow: `Popup/Options -> chromeRPC -> background/sessionManager -> indexedDB + chrome.storage.local -> toolbar/context-menu refresh`.
 - Background initialization is a single awaited promise (`ensureInitialized`). Every message, alarm, and context-menu handler calls it fresh for its own event (via `runInitialized` in `pages/background/index.ts`) rather than awaiting one module-level captured promise, so a failed initialization is retried on the next event instead of being permanently swallowed.
 - `materializeRunningTimer` (in `sessionManager.ts`) is single-flight: interval ticks, the Chrome alarm, initialization, state reads, pause, and other runtime commands can all call it at nearly the same moment, but only one materialization runs at a time. Concurrent callers receive the same authoritative result; a rejected materialization clears the in-flight slot so the next call can retry.
-- Vite `mode` (`production` | `development`), not a private `__DEV__` env var, controls development-only build composition (`vite.config.base.ts`'s `createBaseManifest`/`createBaseConfig`). Production output must never contain the development manifest name, `dev-icon-*` files, or source maps; `pnpm check:builds` / `scripts/verify-chrome-build.mjs` enforce this.
+- Vite `mode` (`production` | `development`), not a private `__DEV__` env var, controls development-only build composition (`vite.config.base.ts`'s `createBaseManifest`/`createBaseConfig`). Production output must never contain the development manifest name, `dev-icon-*` files, or source maps; `pnpm check:build` / `scripts/verify-chrome-build.mjs` enforce this for the production artifact.
 
 ## Core Invariants
 - Only one task is current (`session.currentTaskId`).
