@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as rpc from "@utils/chromeRPC";
 import {
   DEFAULT_TEMPLATE,
@@ -57,6 +57,7 @@ export function usePracticeSession() {
   const saveTimerRef = useRef<number | null>(null);
   const loadRequestIdRef = useRef(0);
   const dateRequestIdRef = useRef(0);
+  const pollingRequestIdRef = useRef(0);
   const previousCurrentTaskId = useRef<string | null>(session.currentTaskId);
 
   useEffect(() => {
@@ -140,6 +141,10 @@ export function usePracticeSession() {
 
   const retryLoad = () => setLoadTick((tick) => tick + 1);
 
+  const invalidatePolling = useCallback(() => {
+    pollingRequestIdRef.current += 1;
+  }, []);
+
   // Autosave: only for today's live, non-running, user-dirty state.
   useEffect(() => {
     if (loadStatus !== "ready") return;
@@ -177,28 +182,36 @@ export function usePracticeSession() {
   // failure; the last known-good state is preserved and an error is shown.
   useEffect(() => {
     if (loadStatus !== "ready" || !running) return;
+    let lastStartedRequestId = pollingRequestIdRef.current;
     const intervalId = window.setInterval(() => {
       void (async () => {
+        if (pollingRequestIdRef.current !== lastStartedRequestId) return;
+        const requestId = ++pollingRequestIdRef.current;
+        lastStartedRequestId = requestId;
         try {
           const [nextState, runningState] = await Promise.all([
             rpc.getSessionState(),
             rpc.getRunningState(),
           ]);
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || pollingRequestIdRef.current !== requestId) return;
           if (!nextState) return;
+          if (!runningState.isRunning) invalidatePolling();
           setTemplate(nextState.template);
           setSession(nextState.session);
           setRunning(runningState.isRunning);
         } catch (error) {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || pollingRequestIdRef.current !== requestId) return;
           setOperationError(
             describeError(error, "Failed to sync the running session."),
           );
         }
       })();
     }, 1000);
-    return () => window.clearInterval(intervalId);
-  }, [loadStatus, running]);
+    return () => {
+      invalidatePolling();
+      window.clearInterval(intervalId);
+    };
+  }, [invalidatePolling, loadStatus, running]);
 
   useEffect(() => {
     const previous = previousCurrentTaskId.current;
@@ -213,8 +226,10 @@ export function usePracticeSession() {
   }, [session.currentTaskId, session.tasks]);
 
   useEffect(() => {
-    if (session.done) setRunning(false);
-  }, [session.done]);
+    if (!session.done) return;
+    invalidatePolling();
+    setRunning(false);
+  }, [invalidatePolling, session.done]);
 
   useEffect(() => {
     if (!isViewingToday && modal) setModal(null);
@@ -265,6 +280,7 @@ export function usePracticeSession() {
     if (!paused) {
       throw new Error("Failed to pause the timer before this action.");
     }
+    invalidatePolling();
     setTemplate(paused.template);
     setSession(paused.session);
     setRunning(false);
@@ -442,6 +458,7 @@ export function usePracticeSession() {
   const stop = async () => {
     try {
       const next = await rpc.pauseSession();
+      invalidatePolling();
       if (next) {
         setTemplate(next.template);
         setSession(next.session);
@@ -460,6 +477,7 @@ export function usePracticeSession() {
       setTemplate(saved.template);
       setSession(saved.session);
       const next = await rpc.completeCurrentTaskAndAdvance();
+      invalidatePolling();
       if (next) {
         setTemplate(next.template);
         setSession(next.session);

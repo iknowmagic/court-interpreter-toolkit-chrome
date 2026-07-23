@@ -70,6 +70,18 @@ function expectExpectedConsoleError(
   expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, resolve, reject };
+}
+
 async function renderRunningWithFakeTimers() {
   const view = renderHook(() => usePracticeSession());
   await act(async () => {
@@ -83,6 +95,24 @@ async function advancePollingInterval() {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
+}
+
+function startDeferredRunningPoll() {
+  mockedRpc.getRunningState
+    .mockResolvedValueOnce({ isRunning: true, isPaused: false })
+    .mockResolvedValueOnce({ isRunning: true, isPaused: false });
+  const stalePoll = createDeferred<PracticeState>();
+  mockedRpc.getSessionState.mockImplementationOnce(() => stalePoll.promise);
+  return stalePoll;
+}
+
+function expectStoppedOnTask(
+  current: ReturnType<typeof usePracticeSession>,
+  taskId: string,
+) {
+  expect(current.running).toBe(false);
+  expect(current.session.currentTaskId).toBe(taskId);
+  expect(current.operationError).toBeNull();
 }
 
 describe("initial load", () => {
@@ -727,6 +757,68 @@ describe("polling", () => {
       expect(result.current.operationError).toBe("poll failed");
       expect(result.current.session).toBe(sessionBefore);
       expectExpectedConsoleError(consoleErrorSpy, "Failed to sync the running session.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a stale poll response after a successful pause-before-mutation", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
+    try {
+      const stalePoll = startDeferredRunningPoll();
+      const { result } = await renderRunningWithFakeTimers();
+
+      await advancePollingInterval();
+      expect(mockedRpc.getSessionState).toHaveBeenCalledTimes(1);
+
+      mockedRpc.pauseSession.mockResolvedValue(buildPracticeState(today));
+      await act(async () => {
+        await result.current.selectTask("task-b");
+      });
+
+      expectStoppedOnTask(result.current, "task-b");
+      expect(result.current.selected?.id).toBe("task-b");
+
+      await act(async () => {
+        stalePoll.resolve(buildPracticeState(today));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expectStoppedOnTask(result.current, "task-b");
+      expect(result.current.selected?.id).toBe("task-b");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a stale poll failure after the session has been successfully stopped", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
+    try {
+      const stalePoll = startDeferredRunningPoll();
+      const paused = buildPracticeState(today, {
+        sessionOverrides: { currentTaskId: "task-b" },
+      });
+      mockedRpc.pauseSession.mockResolvedValue(paused);
+
+      const { result } = await renderRunningWithFakeTimers();
+
+      await advancePollingInterval();
+      expect(mockedRpc.getSessionState).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await result.current.stop();
+      });
+
+      expectStoppedOnTask(result.current, "task-b");
+
+      const consoleErrorSpy = captureExpectedConsoleError();
+      await act(async () => {
+        stalePoll.reject(new Error("stale poll failure"));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expectStoppedOnTask(result.current, "task-b");
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
