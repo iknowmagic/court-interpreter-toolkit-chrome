@@ -40,16 +40,21 @@ beforeEach(async () => {
   // timer callbacks to settle, which fake timers would otherwise freeze.
   await deleteDatabase(DB_NAME);
 
-  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.useFakeTimers({
+    toFake: ["Date", "setInterval", "clearInterval"],
+  });
   vi.setSystemTime(new Date("2026-04-10T12:00:00.000-07:00"));
   chromeMock = installChromeMock();
   dbConnectionResets = [];
 });
 
 afterEach(() => {
+  vi.clearAllTimers();
+
   for (const reset of dbConnectionResets) {
     reset();
   }
+
   vi.useRealTimers();
 });
 
@@ -480,7 +485,6 @@ describe("sessionManager", () => {
   });
 
   it("runs the periodic ticker and logs when a tick's materialization rejects", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000-07:00"));
     const sm = await freshSessionManager();
     const db = await import("../../shared/indexedDB");
