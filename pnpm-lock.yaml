@@ -27,6 +27,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@6.4.3(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0))
+      '@testing-library/dom':
+        specifier: ^10.4.1
+        version: 10.4.1
       '@testing-library/jest-dom':
         specifier: ^6.10.0
         version: 6.10.0(@testing-library/dom@10.4.1)
@@ -69,6 +72,9 @@ importers:
       globals:
         specifier: ^15.15.0
         version: 15.15.0
+      jscpd:
+        specifier: ^5.0.12
+        version: 5.0.12
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1
@@ -1573,8 +1579,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  electron-to-chromium@1.5.394:
-    resolution: {integrity: sha512-Wmt2Gm0o8JWBuGgmc4XZ0u9s1RaCRqhxP47phplmfg04+qypTUurpeJGP45A7Fhv7jdrrVH44PLlR9qXo37cVQ==}
+  electron-to-chromium@1.5.395:
+    resolution: {integrity: sha512-7zt9Aw+SrmxLWLN0zhaTWZQiCdryLVrYTq5R7iZakLvi2UQPYMMsROYV/2qVCzMeCiSXHwKOU+sZ4zOVVlrtKA==}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -2233,6 +2239,44 @@ packages:
 
   js-yaml@4.3.0:
     resolution: {integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==}
+    hasBin: true
+
+  jscpd-darwin-arm64@5.0.12:
+    resolution: {integrity: sha512-CQCDYhQY9yOGGeauzkRGYW/QtXurPCjfDkEhUoM/M5UdmpzxfG3i9mnNsaheJ0RdFRf73mL7JaLVRP8U2l5/kA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  jscpd-darwin-x64@5.0.12:
+    resolution: {integrity: sha512-7XNCDfChP9fPkIWLepd0zGnTov7/5mR7rJ5Utc1MdWFdgkN//qz6FAJ1FhQA0E/qjFedy9XTucfUCgLybSBsjw==}
+    cpu: [x64]
+    os: [darwin]
+
+  jscpd-linux-arm64-gnu@5.0.12:
+    resolution: {integrity: sha512-i/usHD0/8twzb2Qo4vFWcnuAD4IDLS6K/mTXwYy1CiJZDw4gmjfH45jtjdKUyoutTAiNs+ZWZgx1gIRljUbFuA==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  jscpd-linux-x64-gnu@5.0.12:
+    resolution: {integrity: sha512-TqaeSTaGawcqyXSrQvYJFtLRn4aQeHgphGGsq2ZtVAg+lPeuMmh81c3bl0yi2dL3gDX1RGBQKBVul1XQknOuoA==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  jscpd-linux-x64-musl@5.0.12:
+    resolution: {integrity: sha512-WelugY1/rdoo0Y0sqJ2XQOIvyIZTfRe+vP3MJe4XvEUwPF0v+9SQoS34FnfblRhsddVixyNkgl7x/sHid9UMJw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  jscpd-windows-x64-msvc@5.0.12:
+    resolution: {integrity: sha512-01x1klKjvfzI6Of5tI9u72x7TIQZQLLG6kMdsEPJKl/BXbskdknrfCepeTXRBbdFPKs25jfcd0klZ4OdDvww5w==}
+    cpu: [x64]
+    os: [win32]
+
+  jscpd@5.0.12:
+    resolution: {integrity: sha512-87dC+akj2mCywlt8p3xnRlDg0B55u4GDbfE9cuwOOeIxbEuWuIoNqGoYi65A0516aJ4EzAjGwBj1Qb/Ahc8WAQ==}
+    engines: {node: '>=18'}
     hasBin: true
 
   jsdom@29.1.1:
@@ -4705,7 +4749,7 @@ snapshots:
     dependencies:
       baseline-browser-mapping: 2.11.0
       caniuse-lite: 1.0.30001806
-      electron-to-chromium: 1.5.394
+      electron-to-chromium: 1.5.395
       node-releases: 2.0.51
       update-browserslist-db: 1.2.3(browserslist@4.28.7)
 
@@ -4966,7 +5010,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  electron-to-chromium@1.5.394: {}
+  electron-to-chromium@1.5.395: {}
 
   emoji-regex@10.6.0: {}
 
@@ -5848,6 +5892,33 @@ snapshots:
   js-yaml@4.3.0:
     dependencies:
       argparse: 2.0.1
+
+  jscpd-darwin-arm64@5.0.12:
+    optional: true
+
+  jscpd-darwin-x64@5.0.12:
+    optional: true
+
+  jscpd-linux-arm64-gnu@5.0.12:
+    optional: true
+
+  jscpd-linux-x64-gnu@5.0.12:
+    optional: true
+
+  jscpd-linux-x64-musl@5.0.12:
+    optional: true
+
+  jscpd-windows-x64-msvc@5.0.12:
+    optional: true
+
+  jscpd@5.0.12:
+    optionalDependencies:
+      jscpd-darwin-arm64: 5.0.12
+      jscpd-darwin-x64: 5.0.12
+      jscpd-linux-arm64-gnu: 5.0.12
+      jscpd-linux-x64-gnu: 5.0.12
+      jscpd-linux-x64-musl: 5.0.12
+      jscpd-windows-x64-msvc: 5.0.12
 
   jsdom@29.1.1:
     dependencies:
