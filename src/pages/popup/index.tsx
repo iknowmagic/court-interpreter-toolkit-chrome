@@ -2,7 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@assets/styles/globals.css';
 import '@pages/popup/index.css';
-import Popup from '@pages/popup/Popup';
+import SessionPopup from '@pages/popup/SessionPopup';
 
 function init() {
   const rootContainer = document.querySelector("#__root");
@@ -11,7 +11,7 @@ function init() {
   document.body.classList.add("popup-mode");
   rootContainer.classList.add("popup-mode");
   const root = createRoot(rootContainer);
-  root.render(<Popup />);
+  root.render(<SessionPopup />);
 }
 
 init();

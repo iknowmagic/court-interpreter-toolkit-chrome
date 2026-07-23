@@ -1,4 +1,8 @@
-import type { PracticeState, PracticeTemplateTask } from "../shared/practice";
+import type {
+	PracticeState,
+	PracticeTemplateTask,
+	PracticeSessionSummary,
+} from "../shared/practice";
 
 interface Message {
 	action: string;
@@ -29,12 +33,16 @@ export async function loadState(): Promise<PracticeState> {
 	return sendMessage<PracticeState>({ action: "loadState" });
 }
 
-export async function loadStateByDate(date: string): Promise<PracticeState> {
-	return sendMessage<PracticeState>({ action: "loadStateByDate", date });
+export async function readStateByDate(date: string): Promise<PracticeState> {
+	return sendMessage<PracticeState>({ action: "readStateByDate", date });
 }
 
-export async function listSessionDates(): Promise<string[]> {
-	return sendMessage<string[]>({ action: "listSessionDates" });
+export async function listSessionSummaries(): Promise<
+	PracticeSessionSummary[]
+> {
+	return sendMessage<PracticeSessionSummary[]>({
+		action: "listSessionSummaries",
+	});
 }
 
 export async function getSessionState(): Promise<PracticeState | null> {
@@ -47,19 +55,6 @@ export async function startSession(): Promise<PracticeState | null> {
 
 export async function pauseSession(): Promise<PracticeState | null> {
 	return sendMessage<PracticeState | null>({ action: "pauseSession" });
-}
-
-export async function resumeSession(): Promise<PracticeState | null> {
-	return sendMessage<PracticeState | null>({ action: "resumeSession" });
-}
-
-export async function decrementTimer(
-	seconds: number,
-): Promise<PracticeState | null> {
-	return sendMessage<PracticeState | null>({
-		action: "decrementTimer",
-		seconds,
-	});
 }
 
 export async function saveSession(
@@ -105,20 +100,6 @@ export async function setCompletionAlarmSetting(
 	enabled: boolean,
 ): Promise<boolean> {
 	return sendMessage<boolean>({ action: "setCompletionAlarmSetting", enabled });
-}
-
-export async function updateToolbarStatus(
-	state: PracticeState,
-	isRunning: boolean,
-	options?: { timestampMs?: number; forceStopped?: boolean },
-): Promise<void> {
-	await sendMessage<{ ok: true }>({
-		action: "updateToolbarStatus",
-		state,
-		isRunning,
-		timestampMs: options?.timestampMs,
-		forceStopped: options?.forceStopped,
-	});
 }
 
 export async function completeCurrentTaskAndAdvance(): Promise<PracticeState | null> {

@@ -19,19 +19,15 @@
 		"paths": {
 			"@src/*": ["src/*"],
 			"@assets/*": ["src/assets/*"],
-			"@locales/*": ["src/locales/*"],
 			"@pages/*": ["src/pages/*"],
 			"@shared/*": ["src/shared/*"],
 			"@utils/*": ["src/utils/*"],
-			"@components/*": ["src/components/*"],
 			"@background/*": ["src/background/*"]
 		}
 	},
 	"include": [
 		"src",
-		"utils",
 		"vite.config.base.ts",
-		"vite.config.chrome.ts",
-		"vite.config.firefox.ts"
+		"vite.config.chrome.ts"
 	]
 }

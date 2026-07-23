@@ -24,10 +24,15 @@ export interface PracticeState {
 	session: PracticeSession;
 }
 
+export interface PracticeSessionSummary {
+	date: string;
+	completed: boolean;
+}
+
 export interface PracticeBridge {
 	loadState(): Promise<PracticeState>;
-	loadStateByDate(date: string): Promise<PracticeState>;
-	listSessionDates(): Promise<string[]>;
+	readStateByDate(date: string): Promise<PracticeState>;
+	listSessionSummaries(): Promise<PracticeSessionSummary[]>;
 	saveState(state: PracticeState): Promise<PracticeState>;
 	newDay(template: PracticeTemplateTask[]): Promise<PracticeState>;
 	resetToDefaults(): Promise<PracticeState>;
