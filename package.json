@@ -35,7 +35,6 @@
     "duplicates": "python ./scripts/duplicates-report.py > ./tmp/duplicates-$(date +%s).txt",
     "verify:chrome-build": "node scripts/verify-chrome-build.mjs",
     "check:build": "pnpm build:chrome && pnpm verify:chrome-build -- production",
-    "check:builds": "pnpm build:chrome && pnpm verify:chrome-build -- production && pnpm build:chrome:dev && pnpm verify:chrome-build -- development && pnpm build:chrome && pnpm verify:chrome-build -- production",
     "check": "pnpm lint && pnpm typecheck && pnpm coverage && pnpm detect-duplicates && pnpm check:build",
     "build:zip": "pnpm build:chrome && pnpm verify:chrome-build -- production && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\""
   },
