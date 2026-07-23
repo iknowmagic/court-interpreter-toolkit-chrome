@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import SessionPopup from "@pages/popup/SessionPopup";
 import { getLosAngelesDateString, type PracticeState } from "@shared/practice";
 import * as rpc from "@utils/chromeRPC";
@@ -24,6 +24,7 @@ vi.mock("@utils/chromeRPC", () => ({
   startSession: vi.fn(),
   completeCurrentTaskAndAdvance: vi.fn(),
   getSessionState: vi.fn(),
+  resetToDefaults: vi.fn(),
 }));
 
 const mockedRpc = vi.mocked(rpc);
@@ -102,6 +103,10 @@ beforeEach(() => {
   );
   mockedRpc.getSessionState.mockImplementation(async () => buildState(getLosAngelesDateString()));
   mockedRpc.pauseSession.mockResolvedValue(null);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("SessionPopup", () => {
@@ -363,6 +368,43 @@ describe("SessionPopup", () => {
       expect(screen.getByRole("button", { name: "▶ Play" })).not.toBeDisabled();
     });
     expect(screen.getByRole("button", { name: "■ Stop" })).toBeDisabled();
+  });
+
+  it("wires Play, Stop, Reset Task, Done, Move, Delete, and Reset List through to the RPC layer", async () => {
+    const today = getLosAngelesDateString();
+    const initial = buildState(today);
+    mockedRpc.loadState.mockResolvedValue(initial);
+    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
+    mockedRpc.pauseSession.mockResolvedValue(initial);
+    mockedRpc.startSession.mockResolvedValue(initial);
+    mockedRpc.completeCurrentTaskAndAdvance.mockResolvedValue(initial);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    render(<SessionPopup />);
+    await screen.findByText("Current Task");
+
+    fireEvent.click(screen.getByRole("button", { name: "▶ Play" }));
+    await waitFor(() => expect(mockedRpc.startSession).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "■ Stop" }));
+    await waitFor(() => expect(mockedRpc.pauseSession).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "↺ Reset Task" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "✓ Done" }));
+    await waitFor(() =>
+      expect(mockedRpc.completeCurrentTaskAndAdvance).toHaveBeenCalled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "↓ Move Down" }));
+    await waitFor(() => expect(mockedRpc.pauseSession).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Task" }));
+    await waitFor(() => expect(mockedRpc.pauseSession).toHaveBeenCalledTimes(3));
+
+    mockedRpc.resetToDefaults.mockResolvedValue(initial);
+    fireEvent.click(screen.getByRole("button", { name: "Reset List" }));
+    await waitFor(() => expect(mockedRpc.pauseSession).toHaveBeenCalledTimes(4));
   });
 
   it("polls and applies authoritative running-session state from the background", async () => {
