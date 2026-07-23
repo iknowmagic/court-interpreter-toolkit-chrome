@@ -29,9 +29,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --reporter=verbose --coverage",
+    "coverage": "vitest run --coverage",
     "verify:chrome-build": "node scripts/verify-chrome-build.mjs",
     "check:builds": "pnpm build:chrome && pnpm verify:chrome-build -- production && pnpm build:chrome:dev && pnpm verify:chrome-build -- development && pnpm build:chrome && pnpm verify:chrome-build -- production",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:builds && pnpm ladle:build",
+    "check": "pnpm lint && pnpm typecheck && pnpm coverage && pnpm check:builds && pnpm ladle:build",
     "build:zip": "pnpm build:chrome && pnpm verify:chrome-build -- production && mkdir -p tmp && rm -f tmp/court-interpreter-v$npm_package_version.zip && cd dist_chrome && COPYFILE_DISABLE=1 zip -r -X ../tmp/court-interpreter-v$npm_package_version.zip . -x \"*.DS_Store\" -x \"*/.DS_Store\" -x \"__MACOSX/*\" -x \"*/._*\""
   },
   "type": "module",
