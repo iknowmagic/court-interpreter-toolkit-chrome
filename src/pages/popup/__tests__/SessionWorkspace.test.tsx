@@ -2,30 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import SessionWorkspace from "@pages/popup/SessionWorkspace";
-import type { PracticeSession, PracticeSessionTask, PracticeTemplateTask } from "@shared/practice";
+import type { PracticeSessionTask } from "@shared/practice";
+import { PRACTICE_TEMPLATE, buildPracticeSession } from "./popupTestUtils";
 
 type WorkspaceProps = ComponentProps<typeof SessionWorkspace>;
 
-const template: PracticeTemplateTask[] = [
-  { id: "task-a", name: "Task A", duration: 10 },
-  { id: "task-b", name: "Task B", duration: 5 },
-];
-
-function buildSession(overrides: Partial<PracticeSession> = {}): PracticeSession {
-  return {
-    date: "2026-04-10",
-    currentTaskId: "task-a",
-    done: false,
-    tasks: [
-      { id: "task-a", name: "Task A", duration: 10, note: "", completedAt: null, remainingSeconds: 600 },
-      { id: "task-b", name: "Task B", duration: 5, note: "", completedAt: null, remainingSeconds: 300 },
-    ],
-    ...overrides,
-  };
-}
-
 function baseProps(overrides: Partial<WorkspaceProps> = {}): WorkspaceProps {
-  const session = buildSession();
+  const template = PRACTICE_TEMPLATE.map((task) => ({ ...task }));
+  const session = buildPracticeSession("2026-04-10");
   const selected: PracticeSessionTask = session.tasks[0];
   return {
     template,
@@ -79,7 +63,7 @@ describe("SessionWorkspace", () => {
   });
 
   it("shows the complete status and current task label when the session is done", () => {
-    const session = buildSession({ done: true });
+    const session = buildPracticeSession("2026-04-10", { overrides: { done: true } });
     render(
       <SessionWorkspace
         {...(baseProps({ session, active: null, activeIndex: -1 }))}
@@ -102,7 +86,7 @@ describe("SessionWorkspace", () => {
   });
 
   it("shows the completed timestamp for a completed selected task while viewing today", () => {
-    const session = buildSession();
+    const session = buildPracticeSession("2026-04-10");
     session.tasks[0].completedAt = "04/10, 09:00:00";
     const selected = session.tasks[0];
     render(<SessionWorkspace {...(baseProps({ session, selected }))} />);
@@ -121,16 +105,17 @@ describe("SessionWorkspace", () => {
   });
 
   it("disables Delete Task when only one template task remains", () => {
+    const singleTaskTemplate = [{ ...PRACTICE_TEMPLATE[0] }];
     render(
       <SessionWorkspace
-        {...(baseProps({ template: [template[0]] }))}
+        {...(baseProps({ template: singleTaskTemplate }))}
       />,
     );
     expect(screen.getByRole("button", { name: "Delete Task" })).toBeDisabled();
   });
 
   it("disables Reset Task and Done once the active task is already complete", () => {
-    const session = buildSession();
+    const session = buildPracticeSession("2026-04-10");
     session.tasks[0].completedAt = "04/10, 09:00:00";
     render(
       <SessionWorkspace

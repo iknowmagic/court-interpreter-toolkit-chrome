@@ -3,17 +3,14 @@ import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SessionCalendarPopover from "@pages/popup/SessionCalendarPopover";
 import { getLosAngelesDateString } from "@shared/practice";
+import {
+  flushCalendarPositioning,
+  getEnabledCalendarDay,
+} from "./popupTestUtils";
 
 type PopoverProps = ComponentProps<typeof SessionCalendarPopover>;
 
 const today = getLosAngelesDateString();
-
-async function flushPositioning(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  });
-}
 
 function baseProps(overrides: Partial<PopoverProps> = {}): PopoverProps {
   return {
@@ -27,62 +24,66 @@ function baseProps(overrides: Partial<PopoverProps> = {}): PopoverProps {
   };
 }
 
+async function renderOpenPopover(
+  overrides: Partial<PopoverProps> = {},
+): Promise<HTMLElement> {
+  render(<SessionCalendarPopover {...(baseProps(overrides))} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
+  const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
+  await flushCalendarPositioning();
+  return dialog;
+}
+
+function makeRect(overrides: Partial<DOMRect>): DOMRect {
+  return {
+    top: 0,
+    bottom: 10,
+    left: 100,
+    right: 380,
+    width: 280,
+    height: 360,
+    x: 100,
+    y: 0,
+    toJSON() {},
+    ...overrides,
+  } as DOMRect;
+}
+
 describe("SessionCalendarPopover", () => {
   it("is closed initially and opens on trigger click", async () => {
     render(<SessionCalendarPopover {...(baseProps())} />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    await flushPositioning();
+    await flushCalendarPositioning();
     expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
   });
 
   it("disables days with no stored session data other than today", async () => {
-    render(<SessionCalendarPopover {...(baseProps({ summaries: [] }))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
-
+    const dialog = await renderOpenPopover({ summaries: [] });
     const todayDay = new Date().getDate();
-    const buttons = within(dialog).getAllByRole("button", { name: String(todayDay) });
-    const enabledToday = buttons.find((b) => !(b as HTMLButtonElement).disabled);
-    expect(enabledToday).toBeDefined();
+    expect(getEnabledCalendarDay(dialog, String(todayDay))).toBeDefined();
   });
 
-  it("marks a completed day with the is-complete class", async () => {
-    render(
-      <SessionCalendarPopover
-        {...(baseProps({ summaries: [{ date: today, completed: true }] }))}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
-
+  it.each([
+    {
+      name: "completed summary",
+      overrides: { summaries: [{ date: today, completed: true }] },
+    },
+    {
+      name: "isSessionDone without summaries",
+      overrides: { isSessionDone: true, summaries: [] },
+    },
+  ])("marks the selected day complete from $name", async ({ overrides }) => {
+    const dialog = await renderOpenPopover(overrides);
     const todayDay = new Date().getDate();
-    const buttons = within(dialog).getAllByRole("button", { name: String(todayDay) });
-    const selectedButton = buttons.find((b) => b.className.includes("is-selected"));
-    expect(selectedButton?.className).toContain("is-complete");
-  });
-
-  it("marks the session date as selected even when isSessionDone flags it complete", async () => {
-    render(<SessionCalendarPopover {...(baseProps({ isSessionDone: true, summaries: [] }))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
-
-    const todayDay = new Date().getDate();
-    const buttons = within(dialog).getAllByRole("button", { name: String(todayDay) });
-    const selectedButton = buttons.find((b) => b.className.includes("is-selected"));
-    expect(selectedButton?.className).toContain("is-complete");
+    const selectedButton = getEnabledCalendarDay(dialog, String(todayDay));
+    expect(selectedButton.className).toContain("is-selected");
+    expect(selectedButton.className).toContain("is-complete");
   });
 
   it("navigates to the previous and next month", async () => {
-    render(<SessionCalendarPopover {...(baseProps())} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
-
+    const dialog = await renderOpenPopover();
     const currentTitle = within(dialog).getByText(new Date().getFullYear());
     expect(currentTitle).toBeInTheDocument();
 
@@ -93,12 +94,20 @@ describe("SessionCalendarPopover", () => {
     expect(within(dialog).getByText("Su")).toBeInTheDocument();
   });
 
-  it("calls onToday and closes the popover on the Today button", async () => {
-    const onToday = vi.fn().mockResolvedValue(true);
-    render(<SessionCalendarPopover {...(baseProps({ onToday }))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
+  it.each([
+    {
+      name: "closes when onToday resolves true",
+      onTodayResult: true,
+      expectOpen: false,
+    },
+    {
+      name: "stays open when onToday resolves false",
+      onTodayResult: false,
+      expectOpen: true,
+    },
+  ])("$name", async ({ onTodayResult, expectOpen }) => {
+    const onToday = vi.fn().mockResolvedValue(onTodayResult);
+    const dialog = await renderOpenPopover({ onToday });
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Today" }));
@@ -106,34 +115,18 @@ describe("SessionCalendarPopover", () => {
     });
 
     expect(onToday).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("does not close the popover when onToday resolves false", async () => {
-    const onToday = vi.fn().mockResolvedValue(false);
-    render(<SessionCalendarPopover {...(baseProps({ onToday }))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
-
-    await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Today" }));
-      await Promise.resolve();
-    });
-
-    expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
+    if (expectOpen) {
+      expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    }
   });
 
   it("calls onSelectDate for an enabled day and closes on success", async () => {
     const onSelectDate = vi.fn().mockResolvedValue(true);
-    render(<SessionCalendarPopover {...(baseProps({ onSelectDate }))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
-
+    const dialog = await renderOpenPopover({ onSelectDate });
     const todayDay = new Date().getDate();
-    const buttons = within(dialog).getAllByRole("button", { name: String(todayDay) });
-    const enabled = buttons.find((b) => !(b as HTMLButtonElement).disabled)!;
+    const enabled = getEnabledCalendarDay(dialog, String(todayDay));
 
     await act(async () => {
       fireEvent.click(enabled);
@@ -145,10 +138,7 @@ describe("SessionCalendarPopover", () => {
   });
 
   it("closes the popover on Escape", async () => {
-    render(<SessionCalendarPopover {...(baseProps())} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
+    await renderOpenPopover();
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -163,7 +153,7 @@ describe("SessionCalendarPopover", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
     const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
+    await flushCalendarPositioning();
 
     fireEvent.mouseDown(within(dialog).getByText("Session Calendar"));
     expect(screen.getByRole("dialog", { name: "Session calendar" })).toBeInTheDocument();
@@ -173,10 +163,7 @@ describe("SessionCalendarPopover", () => {
   });
 
   it("repositions on window resize and scroll while open", async () => {
-    render(<SessionCalendarPopover {...(baseProps())} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
+    await renderOpenPopover();
 
     expect(() => {
       fireEvent(window, new Event("resize"));
@@ -189,7 +176,7 @@ describe("SessionCalendarPopover", () => {
     const { unmount } = render(<SessionCalendarPopover {...(baseProps())} />);
     fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
     await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
+    await flushCalendarPositioning();
 
     expect(() => unmount()).not.toThrow();
   });
@@ -201,22 +188,13 @@ describe("SessionCalendarPopover placement", () => {
   });
 
   it("places the popover above the anchor when there is enough room above it", async () => {
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(makeRect({
       top: 700,
       bottom: 700,
-      left: 100,
-      right: 380,
-      width: 280,
-      height: 360,
-      x: 100,
       y: 700,
-      toJSON() {},
-    } as DOMRect);
+    }));
 
-    render(<SessionCalendarPopover {...(baseProps())} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushPositioning();
+    const dialog = await renderOpenPopover();
 
     expect(dialog).toHaveAttribute("data-placement", "above");
   });
@@ -224,23 +202,14 @@ describe("SessionCalendarPopover placement", () => {
   it("centers the popover when there is not enough room above or below the anchor", async () => {
     const originalInnerHeight = window.innerHeight;
     Object.defineProperty(window, "innerHeight", { value: 100, configurable: true });
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(makeRect({
       top: 50,
       bottom: 60,
-      left: 100,
-      right: 380,
-      width: 280,
-      height: 360,
-      x: 100,
       y: 50,
-      toJSON() {},
-    } as DOMRect);
+    }));
 
     try {
-      render(<SessionCalendarPopover {...(baseProps())} />);
-      fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-      const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-      await flushPositioning();
+      const dialog = await renderOpenPopover();
 
       expect(dialog).toHaveAttribute("data-placement", "center");
     } finally {

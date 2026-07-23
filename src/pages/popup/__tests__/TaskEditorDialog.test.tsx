@@ -1,12 +1,36 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import TaskEditorDialog from "@pages/popup/TaskEditorDialog";
 import type { ModalState } from "@pages/popup/usePracticeSession";
 
+const ADD_MODAL: ModalState = {
+  mode: "add",
+  initialName: "",
+  initialDuration: "5",
+};
+
+function renderDialog(
+  options: {
+    modal?: ModalState;
+    onSave?: Mock;
+    onCancel?: Mock;
+  } = {},
+) {
+  const onSave = options.onSave ?? vi.fn();
+  const onCancel = options.onCancel ?? vi.fn();
+  render(
+    <TaskEditorDialog
+      modal={options.modal ?? ADD_MODAL}
+      onSave={onSave}
+      onCancel={onCancel}
+    />,
+  );
+  return { onSave, onCancel };
+}
+
 describe("TaskEditorDialog", () => {
   it("shows Add Task title and button in add mode with empty defaults", () => {
-    const modal: ModalState = { mode: "add", initialName: "", initialDuration: "5" };
-    render(<TaskEditorDialog modal={modal} onSave={vi.fn()} onCancel={vi.fn()} />);
+    renderDialog();
 
     expect(screen.getByText("Add Task", { selector: ".practice-modal-title" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Task" })).toBeInTheDocument();
@@ -21,7 +45,7 @@ describe("TaskEditorDialog", () => {
       initialName: "Shadowing",
       initialDuration: "10",
     };
-    render(<TaskEditorDialog modal={modal} onSave={vi.fn()} onCancel={vi.fn()} />);
+    renderDialog({ modal });
 
     expect(screen.getByText("Edit Task")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeInTheDocument();
@@ -30,8 +54,7 @@ describe("TaskEditorDialog", () => {
   });
 
   it("enforces min/max attributes on the duration input", () => {
-    const modal: ModalState = { mode: "add", initialName: "", initialDuration: "5" };
-    render(<TaskEditorDialog modal={modal} onSave={vi.fn()} onCancel={vi.fn()} />);
+    renderDialog();
 
     const durationInput = screen.getByLabelText("Duration (minutes)");
     expect(durationInput).toHaveAttribute("min", "1");
@@ -39,9 +62,7 @@ describe("TaskEditorDialog", () => {
   });
 
   it("passes changed name and duration values to onSave", () => {
-    const onSave = vi.fn();
-    const modal: ModalState = { mode: "add", initialName: "", initialDuration: "5" };
-    render(<TaskEditorDialog modal={modal} onSave={onSave} onCancel={vi.fn()} />);
+    const { onSave } = renderDialog();
 
     fireEvent.change(screen.getByLabelText("Task Name"), { target: { value: "New Drill" } });
     fireEvent.change(screen.getByLabelText("Duration (minutes)"), { target: { value: "12" } });
@@ -53,25 +74,21 @@ describe("TaskEditorDialog", () => {
   it("submits on Enter within the duration input", () => {
     const onSave = vi.fn();
     const modal: ModalState = { mode: "edit", taskId: "t", initialName: "X", initialDuration: "5" };
-    render(<TaskEditorDialog modal={modal} onSave={onSave} onCancel={vi.fn()} />);
+    renderDialog({ modal, onSave });
 
     fireEvent.keyDown(screen.getByLabelText("Duration (minutes)"), { key: "Enter" });
     expect(onSave).toHaveBeenCalledWith("X", "5");
   });
 
   it("ignores non-Enter keys in the duration input", () => {
-    const onSave = vi.fn();
-    const modal: ModalState = { mode: "add", initialName: "", initialDuration: "5" };
-    render(<TaskEditorDialog modal={modal} onSave={onSave} onCancel={vi.fn()} />);
+    const { onSave } = renderDialog();
 
     fireEvent.keyDown(screen.getByLabelText("Duration (minutes)"), { key: "Tab" });
     expect(onSave).not.toHaveBeenCalled();
   });
 
   it("calls onCancel from the Cancel button", () => {
-    const onCancel = vi.fn();
-    const modal: ModalState = { mode: "add", initialName: "", initialDuration: "5" };
-    render(<TaskEditorDialog modal={modal} onSave={vi.fn()} onCancel={onCancel} />);
+    const { onCancel } = renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);

@@ -1,9 +1,16 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import SessionPopup from "@pages/popup/SessionPopup";
 import { getLosAngelesDateString, type PracticeState } from "@shared/practice";
 import * as rpc from "@utils/chromeRPC";
 import { parseDateKey, toDateKey } from "@pages/popup/sessionPopupUtils";
+import {
+  actWait,
+  buildPracticeState,
+  flushCalendarPositioning,
+  getEnabledCalendarDay,
+  wait,
+} from "./popupTestUtils";
 
 // Offsets by whole days using the same local-date arithmetic the calendar
 // popover uses, so the result is guaranteed to land inside the 42-cell grid
@@ -29,69 +36,6 @@ vi.mock("@utils/chromeRPC", () => ({
 
 const mockedRpc = vi.mocked(rpc);
 
-function buildState(date: string, remainingSeconds = 590): PracticeState {
-  return {
-    template: [
-      { id: "task-a", name: "Task A", duration: 10 },
-      { id: "task-b", name: "Task B", duration: 5 },
-    ],
-    session: {
-      date,
-      currentTaskId: "task-a",
-      done: false,
-      tasks: [
-        {
-          id: "task-a",
-          name: "Task A",
-          duration: 10,
-          note: "",
-          completedAt: null,
-          remainingSeconds,
-        },
-        {
-          id: "task-b",
-          name: "Task B",
-          duration: 5,
-          note: "",
-          completedAt: null,
-          remainingSeconds: 300,
-        },
-      ],
-    },
-  };
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Wraps a real-timer wait in `act` so any state update it triggers is flushed. */
-async function actWait(ms: number): Promise<void> {
-  await act(() => wait(ms));
-}
-
-/**
- * The calendar popover measures itself across two nested
- * `requestAnimationFrame` calls before it becomes visible. Flushing both
- * inside `act` keeps that positioning update from leaking into whatever
- * assertion runs next.
- */
-async function flushCalendarPositioning(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  });
-}
-
-function clickEnabledCalendarDay(dialog: HTMLElement, dayLabel: string): void {
-  const candidates = within(dialog).getAllByRole("button", { name: dayLabel });
-  const enabled = candidates.find(
-    (button) => !(button as HTMLButtonElement).disabled,
-  );
-  if (!enabled) throw new Error(`No enabled calendar day button "${dayLabel}"`);
-  fireEvent.click(enabled);
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   mockedRpc.saveState.mockImplementation(async (state) => state);
@@ -99,31 +43,80 @@ beforeEach(() => {
   mockedRpc.completeCurrentTaskAndAdvance.mockResolvedValue(null);
   mockedRpc.listSessionSummaries.mockResolvedValue([]);
   mockedRpc.readStateByDate.mockImplementation(async (date: string) =>
-    buildState(date),
+    buildPracticeState(date),
   );
-  mockedRpc.getSessionState.mockImplementation(async () => buildState(getLosAngelesDateString()));
+  mockedRpc.getSessionState.mockImplementation(async () =>
+    buildPracticeState(getLosAngelesDateString()),
+  );
   mockedRpc.pauseSession.mockResolvedValue(null);
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+function configureInitialState(
+  options: {
+    state?: PracticeState;
+    running?: boolean;
+    paused?: boolean;
+  } = {},
+): PracticeState {
+  const state = options.state ?? buildPracticeState(getLosAngelesDateString());
+  mockedRpc.loadState.mockResolvedValue(state);
+  mockedRpc.getRunningState.mockResolvedValue({
+    isRunning: options.running ?? false,
+    isPaused: options.paused ?? false,
+  });
+  return state;
+}
+
+async function renderReadyPopup(
+  options: {
+    state?: PracticeState;
+    running?: boolean;
+    paused?: boolean;
+    readyMarker?: string | RegExp;
+  } = {},
+): Promise<PracticeState> {
+  const initial = configureInitialState(options);
+  render(<SessionPopup />);
+  await screen.findByText(options.readyMarker ?? "Current Task");
+  return initial;
+}
+
+async function openPopupCalendar(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
+  const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
+  await flushCalendarPositioning();
+  return dialog;
+}
+
+async function waitForPauseSessionCall(): Promise<void> {
+  await waitFor(() => {
+    expect(mockedRpc.pauseSession).toHaveBeenCalled();
+  });
+}
+
+async function renderReadyWithPauseFailure(
+  state = buildPracticeState(getLosAngelesDateString()),
+) {
+  mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  await renderReadyPopup({ state });
+  return consoleErrorSpy;
+}
 
 describe("SessionPopup", () => {
   it("stops timer first and applies edited duration immediately", async () => {
     const today = getLosAngelesDateString();
-    const initial = buildState(today, 590);
-
-    mockedRpc.loadState.mockResolvedValue(initial);
-    mockedRpc.getRunningState.mockResolvedValue({
-      isRunning: true,
-      isPaused: false,
+    const initial = buildPracticeState(today, {
+      firstTaskRemainingSeconds: 590,
     });
     mockedRpc.pauseSession.mockResolvedValue(initial);
 
-    render(<SessionPopup />);
-
-    await screen.findByText("Current Task");
+    await renderReadyPopup({ state: initial, running: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Task" }));
 
@@ -131,9 +124,7 @@ describe("SessionPopup", () => {
     fireEvent.change(durationInput, { target: { value: "15" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
-    await waitFor(() => {
-      expect(mockedRpc.pauseSession).toHaveBeenCalled();
-    });
+    await waitForPauseSessionCall();
 
     await waitFor(() => {
       expect(screen.getByText("15:00")).toBeInTheDocument();
@@ -142,12 +133,10 @@ describe("SessionPopup", () => {
 
   it("shows read-only disabled controls in history mode", async () => {
     const pastDate = "2026-01-01";
-    mockedRpc.loadState.mockResolvedValue(buildState(pastDate));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
-
-    render(<SessionPopup />);
-
-    await screen.findByText("History view — read only");
+    await renderReadyPopup({
+      state: buildPracticeState(pastDate),
+      readyMarker: "History view — read only",
+    });
 
     expect(screen.getByRole("button", { name: "+ Add Task" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit Task" })).toBeDisabled();
@@ -166,21 +155,18 @@ describe("SessionPopup", () => {
     const today = getLosAngelesDateString();
     const pastDate = "2026-01-01";
 
-    mockedRpc.loadState.mockResolvedValue(buildState(pastDate));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
     mockedRpc.listSessionSummaries.mockResolvedValue([
       { date: pastDate, completed: false },
       { date: today, completed: false },
     ]);
-    mockedRpc.pauseSession.mockResolvedValue(buildState(pastDate));
+    mockedRpc.pauseSession.mockResolvedValue(buildPracticeState(pastDate));
 
-    render(<SessionPopup />);
+    await renderReadyPopup({
+      state: buildPracticeState(pastDate),
+      readyMarker: "History view — read only",
+    });
 
-    await screen.findByText("History view — read only");
-
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushCalendarPositioning();
+    await openPopupCalendar();
 
     fireEvent.click(screen.getByRole("button", { name: "Today" }));
 
@@ -198,63 +184,49 @@ describe("SessionPopup", () => {
 
   it("renders an alert with Retry on initial load failure and never autosaves the fallback state", async () => {
     mockedRpc.loadState.mockRejectedValue(new Error("network down"));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    try {
-      render(<SessionPopup />);
+    render(<SessionPopup />);
 
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent("network down");
-      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to load the practice session.",
-        expect.any(Error),
-      );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("network down");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to load the practice session.",
+      expect.any(Error),
+    );
 
-      await actWait(500);
-      expect(mockedRpc.saveState).not.toHaveBeenCalled();
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
+    await actWait(500);
+    expect(mockedRpc.saveState).not.toHaveBeenCalled();
   });
 
   it("renders the real stored session after a successful Retry", async () => {
     const today = getLosAngelesDateString();
     mockedRpc.loadState
       .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce(buildState(today));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
+      .mockResolvedValueOnce(buildPracticeState(today));
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    try {
-      render(<SessionPopup />);
+    render(<SessionPopup />);
 
-      await screen.findByRole("alert");
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to load the practice session.",
-        expect.any(Error),
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("alert");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to load the practice session.",
+      expect.any(Error),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
-      await screen.findByText("Current Task");
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
+    await screen.findByText("Current Task");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("fetches session summaries once and never issues per-date full loads for the calendar", async () => {
     const today = getLosAngelesDateString();
-    mockedRpc.loadState.mockResolvedValue(buildState(today));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
     mockedRpc.listSessionSummaries.mockResolvedValue([
       { date: today, completed: false },
     ]);
 
-    render(<SessionPopup />);
-
-    await screen.findByText("Current Task");
+    await renderReadyPopup({ state: buildPracticeState(today) });
 
     expect(mockedRpc.listSessionSummaries).toHaveBeenCalledTimes(1);
     expect(mockedRpc.readStateByDate).not.toHaveBeenCalled();
@@ -263,21 +235,16 @@ describe("SessionPopup", () => {
   it("uses readStateByDate for a past date and never autosaves the historical view", async () => {
     const today = getLosAngelesDateString();
     const pastDate = offsetDateKey(today, -1);
-    mockedRpc.loadState.mockResolvedValue(buildState(today));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
     mockedRpc.listSessionSummaries.mockResolvedValue([
       { date: pastDate, completed: false },
       { date: today, completed: false },
     ]);
-    mockedRpc.pauseSession.mockResolvedValue(buildState(today));
+    mockedRpc.pauseSession.mockResolvedValue(buildPracticeState(today));
 
-    render(<SessionPopup />);
-    await screen.findByText("Current Task");
+    await renderReadyPopup({ state: buildPracticeState(today) });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushCalendarPositioning();
-    clickEnabledCalendarDay(dialog, String(parseDateKey(pastDate).getDate()));
+    const dialog = await openPopupCalendar();
+    fireEvent.click(getEnabledCalendarDay(dialog, String(parseDateKey(pastDate).getDate())));
 
     await waitFor(() => {
       expect(mockedRpc.readStateByDate).toHaveBeenCalledWith(pastDate);
@@ -291,78 +258,53 @@ describe("SessionPopup", () => {
 
   it("aborts task selection when pause fails and surfaces a visible error", async () => {
     const today = getLosAngelesDateString();
-    const initial = buildState(today);
-    mockedRpc.loadState.mockResolvedValue(initial);
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
-    mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const initial = buildPracticeState(today);
+    const consoleErrorSpy = await renderReadyWithPauseFailure(initial);
 
-    try {
-      render(<SessionPopup />);
-      await screen.findByText("Current Task");
+    fireEvent.click(screen.getByRole("button", { name: /Task B/ }));
 
-      fireEvent.click(screen.getByRole("button", { name: /Task B/ }));
-
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent("pause failed");
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to pause before selecting that task.",
-        expect.any(Error),
-      );
-      // Current task selection must be unchanged.
-      expect(document.querySelector(".practice-current")).toHaveTextContent(
-        "Task A",
-      );
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("pause failed");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to pause before selecting that task.",
+      expect.any(Error),
+    );
+    // Current task selection must be unchanged.
+    expect(document.querySelector(".practice-current")).toHaveTextContent(
+      "Task A",
+    );
   });
 
-  it("aborts add/edit/delete/move/reset/date-navigation mutations when pause fails", async () => {
+  it("aborts saving an edited task when pause fails", async () => {
     const today = getLosAngelesDateString();
-    const initial = buildState(today);
-    mockedRpc.loadState.mockResolvedValue(initial);
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
-    mockedRpc.pauseSession.mockRejectedValue(new Error("pause failed"));
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const initial = buildPracticeState(today);
+    const consoleErrorSpy = await renderReadyWithPauseFailure(initial);
 
-    try {
-      render(<SessionPopup />);
-      await screen.findByText("Current Task");
+    fireEvent.click(screen.getByRole("button", { name: "Edit Task" }));
+    const durationInput = screen.getByLabelText("Duration (minutes)");
+    fireEvent.change(durationInput, { target: { value: "42" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
-      fireEvent.click(screen.getByRole("button", { name: "Edit Task" }));
-      const durationInput = screen.getByLabelText("Duration (minutes)");
-      fireEvent.change(durationInput, { target: { value: "42" } });
-      fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
-
-      await screen.findByRole("alert");
-      expect(screen.queryByText("42:00")).not.toBeInTheDocument();
-      expect(mockedRpc.saveState).not.toHaveBeenCalled();
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to pause before saving the task.",
-        expect.any(Error),
-      );
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
+    await screen.findByRole("alert");
+    expect(screen.queryByText("42:00")).not.toBeInTheDocument();
+    expect(mockedRpc.saveState).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to pause before saving the task.",
+      expect.any(Error),
+    );
   });
 
   it("keeps the session stopped after a successful mutation", async () => {
     const today = getLosAngelesDateString();
-    const initial = buildState(today);
-    mockedRpc.loadState.mockResolvedValue(initial);
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: true, isPaused: false });
+    const initial = buildPracticeState(today);
     mockedRpc.pauseSession.mockResolvedValue(initial);
 
-    render(<SessionPopup />);
-    await screen.findByText("Current Task");
+    await renderReadyPopup({ state: initial, running: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Task" }));
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
-    await waitFor(() => {
-      expect(mockedRpc.pauseSession).toHaveBeenCalled();
-    });
+    await waitForPauseSessionCall();
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "▶ Play" })).not.toBeDisabled();
@@ -372,16 +314,13 @@ describe("SessionPopup", () => {
 
   it("wires Play, Stop, Reset Task, Done, Move, Delete, and Reset List through to the RPC layer", async () => {
     const today = getLosAngelesDateString();
-    const initial = buildState(today);
-    mockedRpc.loadState.mockResolvedValue(initial);
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
+    const initial = buildPracticeState(today);
     mockedRpc.pauseSession.mockResolvedValue(initial);
     mockedRpc.startSession.mockResolvedValue(initial);
     mockedRpc.completeCurrentTaskAndAdvance.mockResolvedValue(initial);
     vi.stubGlobal("confirm", vi.fn(() => true));
 
-    render(<SessionPopup />);
-    await screen.findByText("Current Task");
+    await renderReadyPopup({ state: initial });
 
     fireEvent.click(screen.getByRole("button", { name: "▶ Play" }));
     await waitFor(() => expect(mockedRpc.startSession).toHaveBeenCalled());
@@ -411,9 +350,13 @@ describe("SessionPopup", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
     try {
       const today = getLosAngelesDateString();
-      mockedRpc.loadState.mockResolvedValue(buildState(today, 590));
-      mockedRpc.getRunningState.mockResolvedValue({ isRunning: true, isPaused: false });
-      mockedRpc.getSessionState.mockResolvedValue(buildState(today, 480));
+      const initial = buildPracticeState(today, {
+        firstTaskRemainingSeconds: 590,
+      });
+      configureInitialState({ state: initial, running: true });
+      mockedRpc.getSessionState.mockResolvedValue(
+        buildPracticeState(today, { firstTaskRemainingSeconds: 480 }),
+      );
 
       render(<SessionPopup />);
       // The initial load only awaits real (mocked) promises, not fake
@@ -439,14 +382,12 @@ describe("SessionPopup", () => {
     const today = getLosAngelesDateString();
     const firstCallDate = offsetDateKey(today, -2);
     const secondCallDate = offsetDateKey(today, -1);
-    mockedRpc.loadState.mockResolvedValue(buildState(today));
-    mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
     mockedRpc.listSessionSummaries.mockResolvedValue([
       { date: firstCallDate, completed: false },
       { date: secondCallDate, completed: false },
       { date: today, completed: false },
     ]);
-    mockedRpc.pauseSession.mockResolvedValue(buildState(today));
+    mockedRpc.pauseSession.mockResolvedValue(buildPracticeState(today));
 
     let resolveFirst: (state: PracticeState) => void = () => {};
     mockedRpc.readStateByDate.mockImplementation(async (date: string) => {
@@ -455,28 +396,25 @@ describe("SessionPopup", () => {
           resolveFirst = resolve;
         });
       }
-      return buildState(date);
+      return buildPracticeState(date);
     });
 
-    render(<SessionPopup />);
-    await screen.findByText("Current Task");
+    await renderReadyPopup({ state: buildPracticeState(today) });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
-    const dialog = await screen.findByRole("dialog", { name: "Session calendar" });
-    await flushCalendarPositioning();
-    clickEnabledCalendarDay(dialog, String(parseDateKey(firstCallDate).getDate()));
+    const dialog = await openPopupCalendar();
+    fireEvent.click(getEnabledCalendarDay(dialog, String(parseDateKey(firstCallDate).getDate())));
     await waitFor(() => expect(mockedRpc.readStateByDate).toHaveBeenCalledWith(firstCallDate));
 
     // The first request is still pending (unresolved), so the popover is
     // still open; click the second date from the same still-open dialog.
-    clickEnabledCalendarDay(dialog, String(parseDateKey(secondCallDate).getDate()));
+    fireEvent.click(getEnabledCalendarDay(dialog, String(parseDateKey(secondCallDate).getDate())));
     await waitFor(() => expect(mockedRpc.readStateByDate).toHaveBeenCalledWith(secondCallDate));
 
     await screen.findByText(/Viewing/);
 
     // Resolve the stale, older request after the newer one has already landed.
     await act(async () => {
-      resolveFirst(buildState(firstCallDate));
+      resolveFirst(buildPracticeState(firstCallDate));
       await wait(50);
     });
 

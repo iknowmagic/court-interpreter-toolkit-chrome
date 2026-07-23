@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePracticeSession } from "@pages/popup/usePracticeSession";
 import { getLosAngelesDateString, type PracticeState } from "@shared/practice";
 import * as rpc from "@utils/chromeRPC";
+import { actWait, buildPracticeState } from "./popupTestUtils";
 
 vi.mock("@utils/chromeRPC", () => ({
   loadState: vi.fn(),
@@ -19,47 +20,22 @@ vi.mock("@utils/chromeRPC", () => ({
 
 const mockedRpc = vi.mocked(rpc);
 
-function buildState(date: string, overrides: Partial<PracticeState["session"]> = {}): PracticeState {
-  return {
-    template: [
-      { id: "task-a", name: "Task A", duration: 10 },
-      { id: "task-b", name: "Task B", duration: 5 },
-    ],
-    session: {
-      date,
-      currentTaskId: "task-a",
-      done: false,
-      tasks: [
-        { id: "task-a", name: "Task A", duration: 10, note: "", completedAt: null, remainingSeconds: 600 },
-        { id: "task-b", name: "Task B", duration: 5, note: "", completedAt: null, remainingSeconds: 300 },
-      ],
-      ...overrides,
-    },
-  };
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function actWait(ms: number): Promise<void> {
-  await act(() => wait(ms));
-}
-
 const today = getLosAngelesDateString();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedRpc.loadState.mockResolvedValue(buildState(today));
+  mockedRpc.loadState.mockResolvedValue(buildPracticeState(today));
   mockedRpc.listSessionSummaries.mockResolvedValue([]);
   mockedRpc.getRunningState.mockResolvedValue({ isRunning: false, isPaused: false });
   mockedRpc.saveState.mockImplementation(async (state) => state);
-  mockedRpc.pauseSession.mockImplementation(async () => buildState(today));
-  mockedRpc.startSession.mockImplementation(async () => buildState(today));
+  mockedRpc.pauseSession.mockImplementation(async () => buildPracticeState(today));
+  mockedRpc.startSession.mockImplementation(async () => buildPracticeState(today));
   mockedRpc.completeCurrentTaskAndAdvance.mockResolvedValue(null);
-  mockedRpc.resetToDefaults.mockImplementation(async () => buildState(today));
-  mockedRpc.readStateByDate.mockImplementation(async (date: string) => buildState(date));
-  mockedRpc.getSessionState.mockImplementation(async () => buildState(today));
+  mockedRpc.resetToDefaults.mockImplementation(async () => buildPracticeState(today));
+  mockedRpc.readStateByDate.mockImplementation(async (date: string) =>
+    buildPracticeState(date),
+  );
+  mockedRpc.getSessionState.mockImplementation(async () => buildPracticeState(today));
 });
 
 afterEach(() => {
@@ -72,6 +48,29 @@ async function renderReady() {
   const view = renderHook(() => usePracticeSession());
   await waitFor(() => expect(view.result.current.loadStatus).toBe("ready"));
   return view;
+}
+
+async function renderLoadError(message = "network down") {
+  mockedRpc.loadState.mockRejectedValueOnce(new Error(message));
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const view = renderHook(() => usePracticeSession());
+  await waitFor(() => expect(view.result.current.loadStatus).toBe("error"));
+  return { view, consoleErrorSpy };
+}
+
+async function renderRunningWithFakeTimers() {
+  const view = renderHook(() => usePracticeSession());
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(view.result.current.running).toBe(true);
+  return view;
+}
+
+async function advancePollingInterval() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
 }
 
 describe("initial load", () => {
@@ -87,30 +86,28 @@ describe("initial load", () => {
   });
 
   it("renders an error state and never autosaves the fallback default session on load failure", async () => {
-    mockedRpc.loadState.mockRejectedValue(new Error("network down"));
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const { result } = renderHook(() => usePracticeSession());
-    await waitFor(() => expect(result.current.loadStatus).toBe("error"));
+    const { view, consoleErrorSpy } = await renderLoadError();
+    const { result } = view;
     expect(result.current.loadError).toBe("network down");
 
     await actWait(500);
     expect(mockedRpc.saveState).not.toHaveBeenCalled();
-    consoleErrorSpy.mockRestore();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to load the practice session.",
+      expect.any(Error),
+    );
   });
 
   it("retryLoad re-runs the load and recovers to ready", async () => {
-    mockedRpc.loadState
-      .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce(buildState(today));
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const { result } = renderHook(() => usePracticeSession());
-    await waitFor(() => expect(result.current.loadStatus).toBe("error"));
+    const { view, consoleErrorSpy } = await renderLoadError();
+    const { result } = view;
 
     act(() => result.current.retryLoad());
     await waitFor(() => expect(result.current.loadStatus).toBe("ready"));
-    consoleErrorSpy.mockRestore();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to load the practice session.",
+      expect.any(Error),
+    );
   });
 
   it("does not autosave immediately after an authoritative load", async () => {
@@ -133,7 +130,7 @@ describe("autosave and notes", () => {
   });
 
   it("does not autosave while the session is running", async () => {
-    mockedRpc.startSession.mockResolvedValue(buildState(today));
+    mockedRpc.startSession.mockResolvedValue(buildPracticeState(today));
     const { result } = await renderReady();
 
     await act(async () => {
@@ -212,7 +209,9 @@ describe("autosave and notes", () => {
 
 describe("play, stop, done", () => {
   it("play saves local state first, then applies the authoritative started state", async () => {
-    const started = buildState(today, { currentTaskId: "task-a" });
+    const started = buildPracticeState(today, {
+      sessionOverrides: { currentTaskId: "task-a" },
+    });
     mockedRpc.startSession.mockResolvedValue(started);
     const { result } = await renderReady();
 
@@ -238,7 +237,7 @@ describe("play, stop, done", () => {
   });
 
   it("stop applies the paused authoritative state", async () => {
-    const paused = buildState(today);
+    const paused = buildPracticeState(today);
     mockedRpc.pauseSession.mockResolvedValue(paused);
     const { result } = await renderReady();
 
@@ -263,7 +262,9 @@ describe("play, stop, done", () => {
   });
 
   it("done saves first, completes via RPC, remains stopped, and advances", async () => {
-    const advanced = buildState(today, { currentTaskId: "task-b" });
+    const advanced = buildPracticeState(today, {
+      sessionOverrides: { currentTaskId: "task-b" },
+    });
     mockedRpc.completeCurrentTaskAndAdvance.mockResolvedValue(advanced);
     const { result } = await renderReady();
 
@@ -447,11 +448,13 @@ describe("mutations", () => {
 
   it("resets the active task's progress without a pause round-trip", async () => {
     mockedRpc.completeCurrentTaskAndAdvance.mockResolvedValue(
-      buildState(today, {
-        tasks: [
-          { id: "task-a", name: "Task A", duration: 10, note: "", completedAt: "done", remainingSeconds: 0 },
-          { id: "task-b", name: "Task B", duration: 5, note: "", completedAt: null, remainingSeconds: 300 },
-        ],
+      buildPracticeState(today, {
+        sessionOverrides: {
+          tasks: [
+            { id: "task-a", name: "Task A", duration: 10, note: "", completedAt: "done", remainingSeconds: 0 },
+            { id: "task-b", name: "Task B", duration: 5, note: "", completedAt: null, remainingSeconds: 300 },
+          ],
+        },
       }) as never,
     );
     const { result } = await renderReady();
@@ -631,7 +634,7 @@ describe("date and history navigation", () => {
           resolveFirst = resolve;
         });
       }
-      return Promise.resolve(buildState(date));
+      return Promise.resolve(buildPracticeState(date));
     });
 
     let firstCall: Promise<boolean>;
@@ -645,7 +648,7 @@ describe("date and history navigation", () => {
     expect(result.current.session.date).toBe("2020-06-01");
 
     await act(async () => {
-      resolveFirst(buildState("2020-01-01"));
+      resolveFirst(buildPracticeState("2020-01-01"));
       await firstCall!;
     });
 
@@ -658,18 +661,14 @@ describe("polling", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
     try {
       mockedRpc.getRunningState.mockResolvedValue({ isRunning: true, isPaused: false });
-      const polled = buildState(today, { currentTaskId: "task-b" });
+      const polled = buildPracticeState(today, {
+        sessionOverrides: { currentTaskId: "task-b" },
+      });
       mockedRpc.getSessionState.mockResolvedValue(polled);
 
-      const { result } = renderHook(() => usePracticeSession());
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
-      expect(result.current.running).toBe(true);
+      const { result } = await renderRunningWithFakeTimers();
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1000);
-      });
+      await advancePollingInterval();
       expect(result.current.session.currentTaskId).toBe("task-b");
     } finally {
       vi.useRealTimers();
@@ -680,16 +679,11 @@ describe("polling", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
     try {
       mockedRpc.getRunningState.mockResolvedValue({ isRunning: true, isPaused: false });
-      const { result } = renderHook(() => usePracticeSession());
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      const { result } = await renderRunningWithFakeTimers();
       const sessionBefore = result.current.session;
 
       mockedRpc.getSessionState.mockRejectedValue(new Error("poll failed"));
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1000);
-      });
+      await advancePollingInterval();
 
       expect(result.current.operationError).toBe("poll failed");
       expect(result.current.session).toBe(sessionBefore);
@@ -710,18 +704,12 @@ describe("polling", () => {
           }),
       );
 
-      const { result, unmount } = renderHook(() => usePracticeSession());
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
-      expect(result.current.running).toBe(true);
+      const { unmount } = await renderRunningWithFakeTimers();
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1000);
-      });
+      await advancePollingInterval();
       unmount();
 
-      expect(() => resolvePoll(buildState(today))).not.toThrow();
+      expect(() => resolvePoll(buildPracticeState(today))).not.toThrow();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
