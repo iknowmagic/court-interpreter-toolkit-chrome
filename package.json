@@ -62,7 +62,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "fake-indexeddb": "^6.2.5",
     "globals": "^15.15.0",
-    "jscpd": "^5.0.12",
+    "jscpd": "^5.0.14",
     "jsdom": "^29.1.1",
     "nodemon": "^3.1.14",
     "typescript": "^5.9.3",
